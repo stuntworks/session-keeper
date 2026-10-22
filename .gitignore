@@ -1,0 +1,13 @@
+# Runtime data: session IDs, paths, tab titles. Never commit.
+data/
+WORK/
+releases/
+_workbenches/
+__pycache__/
+*.pyc
+*.bak
+*.log
+# Internal planning notes
+PLAN.md
+STATUS.md
+RECOVERY_RUNBOOK*.md
