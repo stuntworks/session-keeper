@@ -79,12 +79,23 @@ python -m unittest discover -v -p "test_keeper_*.py"
 
 Snapshots and settings are stored in the `data` folder next to the scripts. They contain your session IDs, folder paths and tab titles, so keep that folder private and never commit it.
 
+## Privacy
+
+Session Keeper runs on your PC only. It has no account, no telemetry, and never uploads your snapshots. Claude Code and Codex CLI themselves use their online services as usual once a conversation is resumed.
+
+Session Keeper is an independent project. It is not made or endorsed by Anthropic or OpenAI.
+
 ## Limits
 
 - Claude and Codex **command-line** tabs only. The Codex desktop app is not covered.
 - Split panes and which tab was active are not restored.
 - If a monitor is disconnected, its windows move to the primary monitor, with a warning.
 - Restoring reopens the conversation. It does not send a prompt or continue an interrupted task.
+- A conversation where nothing was ever typed cannot be resumed.
+- Conversations reopen in normal mode. Start options the original session used (for example permission flags) are not carried over.
+- If Claude Code asks whether you trust a folder after a restore, answer it in that tab.
+- PowerShell and Windows Terminal profiles only. Git Bash and WSL tabs are not covered, and the **Copy command** lines are for PowerShell.
+- Session Keeper reads the session files Claude Code and Codex CLI save on your PC. Their format is not a public interface, so an update to either tool can break matching until Session Keeper is updated.
 - Tested with automated tests and live layout captures. A full recovery after a real reboot has not yet been verified end to end. Reports welcome.
 
 ## License
