@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Dark recovery screen opening on Saved recovery; time scrubber loads off the Tk thread | Full history: git log
+# Last modified: 2026-10-22 | Change: prune command and hourly snapshot thinning in the recorder | Full history: git log
 """Session Keeper: record terminal groups and offer a safe recovery menu."""
 
 import argparse
@@ -25,6 +25,7 @@ from keeper_fast_history import fast_history, newest_snapshot
 from keeper_history import startup_recovery
 from keeper_background import run_background
 from keeper_locks import exclusive_operation
+from keeper_prune import prune_if_due, report_text, run_prune
 from configure_terminal import terminal_restore_enabled
 from keeper_live_view import LiveChatsPanel
 from keeper_loading import LoadingWindow, load_then_show
@@ -387,14 +388,40 @@ def snapshot_once():
     return None
 
 
+# WHAT IT DOES: Takes one snapshot; after a successful one, thins old snapshots if an hour has passed.
+# DEPENDS ON: snapshot_once; keeper_prune.prune_if_due (takes the restore lock itself, never raises).
+# AFFECTS: The background recorder's work on its worker thread; returns the new snapshot path or None.
+def record_once():
+    path = snapshot_once()
+    if path:
+        prune_if_due()
+    return path
+
+
+# WHAT IT DOES: Prints the keep-plan report; deletes only with apply=True and only while no restore runs.
+# DEPENDS ON: keeper_prune.run_prune and the restore lock.
+# AFFECTS: apply=False is read-only.
+def run_prune_command(apply):
+    if not apply:
+        print(report_text(run_prune()))
+        return
+    try:
+        with exclusive_operation("restore"):
+            report = run_prune(apply=True)
+    except RuntimeError as error:
+        print(f"Not pruned: {error}. Try again when the restore has finished.")
+        return
+    print(report_text(report))
+
+
 # WHAT IT DOES: Keeps taking snapshots while Windows is running.
-# DEPENDS ON: Tk event loop and snapshot_once.
+# DEPENDS ON: Tk event loop and record_once.
 # AFFECTS: Future crashes can use the latest captured layout.
 def watch(root):
     if root.state() != "withdrawn":
         root.after(INTERVAL_MS, lambda: watch(root))
         return
-    run_background(root, snapshot_once, lambda path: snapshot_finished(root, path),
+    run_background(root, record_once, lambda path: snapshot_finished(root, path),
                    lambda error: snapshot_failed(root, error))
 
 
@@ -423,8 +450,12 @@ def snapshot_failed(root, error):
 # AFFECTS: Watch records state; recover opens the selection UI.
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("snapshot", "watch", "recover"))
+    parser.add_argument("mode", choices=("snapshot", "watch", "recover", "prune"))
+    parser.add_argument("--apply", action="store_true", help="prune: really delete (default is a dry run)")
     arguments = parser.parse_args()
+    if arguments.mode == "prune":
+        run_prune_command(apply=arguments.apply)
+        return
     if arguments.mode == "snapshot":
         print(snapshot_once() or "No matched live sessions; nothing recorded")
         return

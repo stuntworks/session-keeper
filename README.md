@@ -48,7 +48,7 @@ If you run many AI coding sessions at once, a crash or reboot loses all of them:
 
 ## Day to day
 
-You do nothing. The recorder runs silently and saves a snapshot about every two minutes: every Windows Terminal window, its tabs, and the exact Claude or Codex conversation in each tab. Closing a tab is normal use, not a crash, and it never pops anything up while you work. Old snapshots are never overwritten.
+You do nothing. The recorder runs silently and saves a snapshot about every two minutes: every Windows Terminal window, its tabs, and the exact Claude or Codex conversation in each tab. Closing a tab is normal use, not a crash, and it never pops anything up while you work. Old snapshots are thinned once an hour: it keeps everything from the last 2 hours, one per hour for 7 days, one per day for 30 days, and always the newest one and the last one before every reboot.
 
 ## After a crash or reboot
 

@@ -1,5 +1,5 @@
 # Last modified: 2026-10-19 | Change: Short snapshot chooser built from history checkpoints | Full history: git log
-"""Turns thousands of saved snapshots into a short list of meaningful moments. Nothing is deleted or pruned."""
+"""Turns thousands of saved snapshots into a short list of meaningful moments. Read-only (thinning lives in keeper_prune)."""
 
 from datetime import datetime, timedelta
 
