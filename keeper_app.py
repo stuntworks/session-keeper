@@ -21,7 +21,8 @@ from keeper_ask import OccupiedDialog
 from keeper_copycmd import build_resume_text
 from keeper_display import big_geometry, make_dpi_aware, pointer_monitor, read_monitors
 from keeper_settings import auto_restore_enabled
-from keeper_history import read_history, startup_recovery
+from keeper_fast_history import fast_history, newest_snapshot
+from keeper_history import startup_recovery
 from keeper_background import run_background
 from keeper_locks import exclusive_operation
 from configure_terminal import terminal_restore_enabled
@@ -37,8 +38,7 @@ INTERVAL_MS = 120_000
 # DEPENDS ON: Immutable snapshots under the app's data directory.
 # AFFECTS: The recovery screen displays the chosen saved layout.
 def latest_recovery_snapshot():
-    history = read_history()
-    return history[0] if history else None
+    return newest_snapshot()
 
 
 # WHAT IT DOES: Recovery screen: the monitor map is the menu; click tabs to choose what comes back.
@@ -63,7 +63,7 @@ class RecoveryWindow(RecoveryScreen):
         self.theme = Theme(root, int(geometry.split("x")[0]))
         self.theme.style_ttk()
         self.root.configure(background=ROOM)
-        self.history = history if history is not None else read_history()
+        self.history = history if history is not None else fast_history()
         self.entries = chooser_entries(self.history)
         self.stops = scrubber_stops(self.history, self.entries) if self.history else []
         self.auto_restore_default = auto_restore_enabled

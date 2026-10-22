@@ -97,6 +97,9 @@ def launch_tab(window_name, row):
     from keeper_core import SESSION_ID
     if not SESSION_ID.fullmatch(row["session_id"]):
         raise ValueError("Invalid session ID")
+    cwd = row.get("cwd")
+    if not isinstance(cwd, str) or not cwd.strip():
+        raise ValueError("Saved project folder is unknown; refusing to guess one")
     if not Path(row["cwd"]).is_dir() or any(character in row["cwd"] for character in (';', '\n', '\r', '"')):
         raise ValueError("Saved project folder is missing or cannot be passed safely to Windows Terminal")
     title = row["title"][:70].replace(';', ',').replace('\n', ' ').replace('\r', ' ') or "Recovered session"

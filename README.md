@@ -38,6 +38,8 @@ If you run many AI coding sessions at once, a crash or reboot loses all of them:
    python configure_terminal.py --apply  # apply it (backs up your Terminal settings first)
    ```
 
+   It finds Windows Terminal (Store), Preview, Canary and unpackaged installs, and changes each settings file it finds.
+
 4. Log out and back in, or start the recorder now without waiting:
 
    ```powershell

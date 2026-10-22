@@ -133,11 +133,14 @@ def recovery_rows(snapshot: dict) -> list[dict]:
                 continue
             if tab.get("outcome") != "MATCHED" or not SESSION_ID.fullmatch(tab.get("sessionId", "")):
                 continue
+            # Never guess the folder: a tab with no saved folder stays shown but is not restorable.
+            if not isinstance(tab.get("cwd"), str) or not tab["cwd"].strip():
+                continue
             rows.append({"key": f"{window_index}:{tab_index}", "window_index": window_index,
                          "tab_index": tab_index, "session_id": tab["sessionId"],
                          "kind": tab.get("kind", "claude"),
                          "title": tab.get("strippedTitle") or "Claude session",
-                         "cwd": tab.get("cwd") or str(Path.home()),
+                         "cwd": tab["cwd"],
                          "window": window})
     return rows
 

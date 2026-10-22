@@ -4,6 +4,7 @@
 from keeper_copycmd import build_resume_text
 
 OPEN_NOTE = "This one is already running; opening it again would make a duplicate."
+FOLDER_NOTE = "The project folder for this tab was not recorded, so it is not restored and there is no command to copy."
 UNKNOWN_NOTE = "No exact session found, so there is no command to copy."
 
 
@@ -20,6 +21,8 @@ def tab_details(snapshot, key, rows, live):
             "program": "", "folder": tab.get("cwd") or "", "status": "Can't be identified",
             "command": "", "can_copy": False, "note": UNKNOWN_NOTE}
     if not row:
+        if tab.get("outcome") == "MATCHED" and not (tab.get("cwd") or "").strip():
+            info["note"] = FOLDER_NOTE
         return info
     info["program"] = "Codex" if row["kind"] == "codex" else "Claude"
     info["folder"] = row["cwd"]

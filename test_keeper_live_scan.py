@@ -229,7 +229,7 @@ class LiveScanTests(unittest.TestCase):
                 sessions = active_codex_sessions(read_titles=False)
             self.assertEqual([(s["pid"], s["sessionId"], s["role"], s["cwd"]) for s in sessions],
                              [(11, ROLLOUT_ID, "interactive", folder), (12, None, "worker", folder),
-                              (15, ROLLOUT_ID, "interactive", str(Path.home()))])
+                              (15, ROLLOUT_ID, "interactive", None)])
             self.assertEqual(table.start_time_reads, {})
 
 

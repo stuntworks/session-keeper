@@ -91,7 +91,7 @@ def active_codex_sessions(read_titles=True):
             if read_titles and not title and not verified:
                 continue
             sessions.append({"pid": process.pid, "title": title,
-                             "sessionId": session_id, "cwd": process.info.get("cwd") or str(Path.home()),
+                             "sessionId": session_id, "cwd": process.info.get("cwd"),
                              "method": method, "role": "interactive"})
         except psutil.NoSuchProcess:
             continue

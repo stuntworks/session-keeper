@@ -150,3 +150,23 @@ def fast_history(data_dir=DATA, now=None):
     history = [item for item in history if name_time(item[0]) is None]
     history += [(probe.paths[index], probe.load(index)) for index in probe.keep]
     return sorted(history, key=lambda item: item[1]["captured_at"], reverse=True)
+
+
+# WHAT IT DOES: Returns (path, snapshot) for the newest valid saved layout, reading the newest few files by name.
+# DEPENDS ON: The snapshot folder; save_snapshot's file names. Files with other names (legacy) are parsed in full.
+# AFFECTS: Read-only. Used by the login auto-restore, which needs only the newest layout, never the whole history.
+def newest_snapshot(data_dir=DATA):
+    stamped, candidates = [], []
+    for path in Path(data_dir).glob("snapshot_*.json"):
+        stamp = name_time(path)
+        if stamp is None:
+            if (snapshot := load_snapshot(path)) is not None:
+                candidates.append((path, snapshot))
+        else:
+            stamped.append((stamp, path.name, path))
+    for _, _, path in sorted(stamped, reverse=True):
+        snapshot = load_snapshot(path)
+        if snapshot is not None:  # newest valid file by name; broken (interrupted) ones are skipped like read_history
+            candidates.append((path, snapshot))
+            break
+    return max(candidates, key=lambda item: moment(item[1]), default=None)

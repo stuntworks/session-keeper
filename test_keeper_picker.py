@@ -138,7 +138,7 @@ class PickerWindowTests(unittest.TestCase):
         self.root.withdraw()
         self.addCleanup(self.root.destroy)
         self.history = [(Path("new.json"), layout()), (Path("old.json"), layout("2026-10-18T09:00:00+00:00", "boot-1"))]
-        for target, value in [("read_history", self.history), ("live_session_ids", LIVE),
+        for target, value in [("fast_history", self.history), ("live_session_ids", LIVE),
                               ("auto_restore_enabled", False), ("terminal_restore_enabled", False),
                               ("window_geometry", "1400x860")]:
             patcher = patch.object(keeper_app, target, return_value=value)

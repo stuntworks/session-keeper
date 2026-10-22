@@ -17,7 +17,9 @@ def build_resume_text(rows):
     for row in rows:
         if not SESSION_ID.fullmatch(row.get("session_id") or ""):
             raise ValueError("Tab has no exact session ID")
-        cwd = row["cwd"]
+        cwd = row.get("cwd")
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise ValueError("Saved project folder is unknown, so there is no safe command to copy")
         if "\n" in cwd or "\r" in cwd:
             raise ValueError("Saved project folder cannot be quoted safely")
         if not Path(cwd).is_dir():

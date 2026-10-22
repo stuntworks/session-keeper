@@ -11,8 +11,8 @@ from keeper_core import plan_restore
 # ISOLATED
 def layout():
     return {'captured_at':'saved','windows':[
-      {'x':0,'y':0,'w':1000,'h':700,'tabs':[{'outcome':'MATCHED','sessionId':'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','strippedTitle':'First'}]},
-      {'x':850,'y':0,'w':1000,'h':700,'tabs':[{'outcome':'MATCHED','sessionId':'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','strippedTitle':'Second'}]}]}
+      {'x':0,'y':0,'w':1000,'h':700,'tabs':[{'outcome':'MATCHED','sessionId':'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','strippedTitle':'First','cwd':'C:/proj'}]},
+      {'x':850,'y':0,'w':1000,'h':700,'tabs':[{'outcome':'MATCHED','sessionId':'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','strippedTitle':'Second','cwd':'C:/proj'}]}]}
 
 # WHAT IT DOES: Proves login respects consent and still skips foreign windows.
 # DEPENDS ON: Fake Tk, history, and window records.
@@ -90,7 +90,7 @@ class StartupIntegrationTests(unittest.TestCase):
         for competing in (False,True):
             root=tk.Tk();root.withdraw()
             try:
-                with patch.object(keeper_app,'read_history',return_value=[]), patch.object(keeper_app,'live_session_ids',return_value=set()), patch.object(keeper_app,'auto_restore_enabled',return_value=True), patch.object(keeper_app,'terminal_restore_enabled',return_value=competing), patch.object(keeper_app,'LiveChatsPanel'), patch.object(keeper_app,'restore_selected') as restore:
+                with patch.object(keeper_app,'fast_history',return_value=[]), patch.object(keeper_app,'live_session_ids',return_value=set()), patch.object(keeper_app,'auto_restore_enabled',return_value=True), patch.object(keeper_app,'terminal_restore_enabled',return_value=competing), patch.object(keeper_app,'LiveChatsPanel'), patch.object(keeper_app,'restore_selected') as restore:
                     view=keeper_app.RecoveryWindow(root,Path('saved.json'),layout(),watch_mode=True)
                     if competing:
                         self.assertIsNone(view.countdown_job)

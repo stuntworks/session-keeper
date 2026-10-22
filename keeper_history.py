@@ -39,10 +39,11 @@ def load_snapshot(path):
 # DEPENDS ON: Saved layout history and current Windows boot ID.
 # AFFECTS: Restarting the watcher on the same boot does not resurrect an older boot's layout.
 def startup_recovery(current_boot, data_dir=DATA):
-    history = read_history(data_dir)
-    if not history:
+    from keeper_fast_history import newest_snapshot  # login must not parse every snapshot file
+    newest = newest_snapshot(data_dir)
+    if newest is None:
         return None
-    path, snapshot = history[0]
+    path, snapshot = newest
     if snapshot.get("boot_id") != current_boot and not snapshot.get("legacy"):
         return path, snapshot
     return None
