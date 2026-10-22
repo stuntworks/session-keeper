@@ -1,6 +1,9 @@
 # Last modified: 2026-10-22 | Change: Minimised and hidden windows are taskbar buttons | Full history: git log
 """Hidden Tk roots and fakes only: nothing is launched, focused or closed."""
 
+import os
+import shutil
+import tempfile
 import tkinter as tk
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -16,6 +19,12 @@ from keeper_map_layout import nudge_apart, shares_column, split_windows
 IDS = [str(n) * 8 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 12 for n in range(1, 8)]
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 
+REAL = tempfile.mkdtemp(prefix="keeper_pk_")
+
+
+def tearDownModule():
+    shutil.rmtree(REAL, ignore_errors=True)
+
 
 # WHAT IT DOES: Builds a two-monitor layout: window 1 fully open, window 2 with a missing "green" tab,
 # window 3 minimised, plus one unidentified tab.
@@ -23,7 +32,7 @@ NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 # AFFECTS: Test data only.
 def layout(captured="2026-10-19T11:50:00+00:00", boot="boot-2"):
     def tab(i, title):
-        return {"outcome": "MATCHED", "sessionId": IDS[i], "strippedTitle": title, "cwd": "C:\\Users\\example"}
+        return {"outcome": "MATCHED", "sessionId": IDS[i], "strippedTitle": title, "cwd": REAL}
     return {"version": 1, "captured_at": captured, "boot_id": boot,
             "monitors": [{"x": 0, "y": 0, "w": 3840, "h": 2088, "primary": True},
                          {"x": 3840, "y": 0, "w": 3840, "h": 2088, "primary": False}],
@@ -201,7 +210,7 @@ class PickerWindowTests(unittest.TestCase):
                  "Release checklist", "Asset pipeline", "Data scanner", "Call log"]
         snapshot["windows"][1]["tabs"] = [
             {"outcome": "MATCHED", "sessionId": f"{n:08d}-0000-4000-8000-{n:012d}", "strippedTitle": name,
-             "cwd": r"C:\Users\example"} for n, name in enumerate(names)]
+             "cwd": REAL} for n, name in enumerate(names)]
         view = keeper_app.RecoveryWindow(self.root, Path("crowded.json"), snapshot)
         view.map.size = (1600, 800)
         view.map.draw()
@@ -405,7 +414,7 @@ class PickerWindowTests(unittest.TestCase):
         view.map.toggle("1:1")
         view.copy_command()
         self.assertEqual(self.root.clipboard_get(),
-                         'cd "' + "C:" + chr(92) + "Users" + chr(92) + 'example"' + chr(10) + 'claude -r ' + IDS[3])
+                         "if (Set-Location -LiteralPath '" + REAL + "' -PassThru) { claude -r " + IDS[3] + " }")
         self.assertIn("Copied command for green", view.copy_status.cget("text"))
         self.assertEqual(view.copy_button.cget("text"), "Copied")
         view.check_all()

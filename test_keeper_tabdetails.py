@@ -1,6 +1,9 @@
 # Last modified: 2026-10-21 | Change: Tests for the tab details text/state builder and the click-to-fill panel | Full history: git log
 """Fake data only. Hidden Tk roots: nothing is launched, focused or closed."""
 
+import os
+import shutil
+import tempfile
 import tkinter as tk
 import unittest
 
@@ -11,9 +14,15 @@ from keeper_tabdetails import tab_details
 
 IDS = [str(n) * 8 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 12 for n in range(1, 6)]
 
+REAL = tempfile.mkdtemp(prefix="keeper_td_")
+
+
+def tearDownModule():
+    shutil.rmtree(REAL, ignore_errors=True)
+
 
 def snap():
-    def tab(i, title, kind="claude", cwd="C:/Users/example/ProjectA"):
+    def tab(i, title, kind="claude", cwd=REAL):
         return {"outcome": "MATCHED", "sessionId": IDS[i], "strippedTitle": title, "kind": kind, "cwd": cwd}
     return {"version": 1, "monitors": [], "windows": [
         {"x": 0, "y": 0, "w": 800, "h": 600, "tabs": [tab(0, "red"), tab(1, "blue", "codex")]},
@@ -36,7 +45,7 @@ class TabDetailsTests(unittest.TestCase):
         self.assertEqual(info["name"], "red")
         self.assertEqual(info["program"], "Claude")
         self.assertEqual(info["window"], 1)
-        self.assertEqual(info["folder"], "C:/Users/example/ProjectA")
+        self.assertEqual(info["folder"], REAL)
         self.assertEqual(info["command"], build_resume_text([self.rows["0:0"]]))
         self.assertIn(f"claude -r {IDS[0]}", info["command"])
         self.assertTrue(info["can_copy"])
@@ -65,7 +74,7 @@ class TabDetailsTests(unittest.TestCase):
 
     def test_unbuildable_command_is_not_copyable(self):
         self.live = set()
-        self.rows["0:0"]["cwd"] = 'C:/bad"folder'
+        self.rows["0:0"]["cwd"] = os.path.join(REAL, "gone")
         info = self.details("0:0")
         self.assertEqual(info["command"], "")
         self.assertFalse(info["can_copy"])

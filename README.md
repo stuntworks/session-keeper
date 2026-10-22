@@ -56,7 +56,7 @@ You do nothing. The recorder runs silently and saves a snapshot about every two 
 4. Click the missing tabs you want. Click a window's title bar to select all its missing tabs, or press **Select all** (formerly "Check all available") for every window.
 5. Press **Preview** to see exactly what would happen, or **Restart selected** (formerly "Restart checked") to do it.
 6. A missing tab whose window is still open is added back into that same window. Otherwise each conversation reopens grouped into its original window at its original spot.
-7. **Copy command** (green when tabs are selected) puts the exact `cd` and `claude -r <session id>` (or `codex resume <id>`) lines for each selected tab on the clipboard, one block per tab. Paste them into a terminal if the automatic restore fails.
+7. **Copy command** (green when tabs are selected) copies one PowerShell line per tab. It moves to the saved folder and resumes the chat (`claude -r <session id>` or `codex resume <id>`) only if that folder exists. Paste them into PowerShell if the automatic restore fails.
 8. **Saved layout** picks an earlier moment: Latest, Before last reboot, 15 min ago, 1 hour ago, earlier today, or previous days.
 
 **Optional: automatic recovery.** On the recovery screen, tick **Restore saved chats at next Windows login**. After the next reboot, the recovery screen opens by itself at login and restores everything after a ten-second countdown. Press **Skip / STOP** to cancel. It is off by default and only triggers after a real reboot, never when the recorder simply restarts.
