@@ -401,13 +401,13 @@ def record_once():
 # WHAT IT DOES: Prints the keep-plan report; deletes only with apply=True and only while no restore runs.
 # DEPENDS ON: keeper_prune.run_prune and the restore lock.
 # AFFECTS: apply=False is read-only.
-def run_prune_command(apply):
+def run_prune_command(apply, force=False):
     if not apply:
         print(report_text(run_prune()))
         return
     try:
         with exclusive_operation("restore"):
-            report = run_prune(apply=True)
+            report = run_prune(apply=True, force=force)
     except RuntimeError as error:
         print(f"Not pruned: {error}. Try again when the restore has finished.")
         return
@@ -452,9 +452,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("snapshot", "watch", "recover", "prune"))
     parser.add_argument("--apply", action="store_true", help="prune: really delete (default is a dry run)")
+    parser.add_argument("--force", action="store_true", help="prune --apply: delete even when the PC clock looks wrong")
     arguments = parser.parse_args()
     if arguments.mode == "prune":
-        run_prune_command(apply=arguments.apply)
+        run_prune_command(apply=arguments.apply, force=arguments.force)
         return
     if arguments.mode == "snapshot":
         print(snapshot_once() or "No matched live sessions; nothing recorded")

@@ -22,6 +22,37 @@ class SetupTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             proposed_settings(b'{"firstWindowPreference":"persistedWindowLayout","firstWindowPreference":"defaultProfile"}')
 
+    # WHAT IT DOES: A bad or duplicate-key settings file never raises out of the login check; it counts as "might be on".
+    # ISOLATED
+    def test_bad_file_never_raises_and_counts_as_possibly_on(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import configure_terminal
+        with tempfile.TemporaryDirectory() as folder:
+            bad = Path(folder) / "settings.json"
+            bad.write_bytes(b'{"firstWindowPreference":"defaultProfile","firstWindowPreference":"defaultProfile"}')
+            with patch.object(configure_terminal, "settings_files", return_value=[("x", bad)]),                     patch.object(configure_terminal, "BAD_FILE_LOG", Path(folder) / "watcher_errors.log"):
+                self.assertTrue(configure_terminal.terminal_restore_enabled())
+                self.assertIn("duplicate", (Path(folder) / "watcher_errors.log").read_text(encoding="utf-8"))
+
+    # WHAT IT DOES: The CLI reports a bad file in its own entry and still handles the others.
+    # ISOLATED
+    def test_cli_message_for_bad_file(self):
+        import tempfile
+        from pathlib import Path
+        import configure_terminal
+        with tempfile.TemporaryDirectory() as folder:
+            bad = Path(folder) / "bad.json"
+            bad.write_bytes(b'{"firstWindowPreference":"persistedWindowLayout","firstWindowPreference":"x"}')
+            good = Path(folder) / "good.json"
+            good.write_bytes(b'{"firstWindowPreference": "persistedWindowLayout"}')
+            reports, code = configure_terminal.run(False, [("bad", bad), ("good", good)], Path(folder) / "b")
+            self.assertEqual(code, 1)
+            self.assertIn("error", reports[0])
+            self.assertNotIn("error", reports[1])
+            self.assertIn("bad.json", configure_terminal.describe(reports[0]))
+
     # WHAT IT DOES: Preserves a saved window that is visible on the second monitor.
     # ISOLATED
     def test_visible_position_kept(self):

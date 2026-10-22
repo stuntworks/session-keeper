@@ -169,7 +169,11 @@ class SnapshotMap(tk.Frame):
         full = tab.get("strippedTitle") or tab.get("rawTitle") or "Unnamed tab"
         state = self.tab_state(key)
         label = ("? " if state == "unknown" else "") + full   # the tab itself shortens it to fit
-        note = {"live": "already open", "unknown": "not identified, cannot be restored",
+        if state == "unknown" and tab.get("outcome") == "MATCHED" and not (tab.get("cwd") or "").strip():
+            unknown_note = "project folder not recorded, cannot be restored"
+        else:
+            unknown_note = "not identified, cannot be restored"
+        note = {"live": "already open", "unknown": unknown_note,
                 "missing": "closed - click to bring back", "selected": "selected to bring back"}[state]
         return label, f"{full}  ({note})"
 

@@ -19,6 +19,7 @@ LOCATIONS = (
 )
 SETTINGS = Path(os.environ.get("LOCALAPPDATA", ".")) / LOCATIONS[0][1]
 BACKUPS = Path(__file__).resolve().parent / "data" / "terminal_settings_backups"
+BAD_FILE_LOG = Path(__file__).resolve().parent / "data" / "watcher_errors.log"
 RESTORE_PROPERTY = re.compile(rb'("firstWindowPreference"\s*:\s*")([^"\r\n]+)(")')
 
 
@@ -37,7 +38,7 @@ def settings_files(base=None):
 # AFFECTS: Automatic recovery is held when Terminal is also configured to restore windows.
 def terminal_restore_enabled(path=None):
     if path is None:
-        return any(terminal_restore_enabled(found) for _, found in settings_files())
+        return any(restore_possibly_on(found) for _, found in settings_files())
     try:
         matches = list(RESTORE_PROPERTY.finditer(Path(path).read_bytes()))
         if len(matches) > 1:
@@ -45,6 +46,23 @@ def terminal_restore_enabled(path=None):
         return bool(matches and matches[0].group(2) == b"persistedWindowLayout")
     except FileNotFoundError:
         return False
+
+
+# WHAT IT DOES: Like terminal_restore_enabled for one file, but never raises: a duplicate key, unreadable file or
+# bad content is logged and counts as True ("Terminal restore might be on"), so login waits for Terminal first.
+# DEPENDS ON: terminal_restore_enabled; BAD_FILE_LOG (append-only).
+# AFFECTS: One line in watcher_errors.log per bad file.
+def restore_possibly_on(path):
+    try:
+        return terminal_restore_enabled(path)
+    except Exception as error:
+        try:
+            BAD_FILE_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with BAD_FILE_LOG.open("a", encoding="utf-8") as file:
+                file.write(f"{datetime.now().isoformat()} terminal settings {path}: {error}; treating restore as possibly on\n")
+        except OSError:
+            pass
+        return True
 
 
 # WHAT IT DOES: Prepares the exact one-value change while preserving every other byte.
@@ -108,6 +126,14 @@ def run(apply, files, backups=BACKUPS):
     return reports, code
 
 
+# WHAT IT DOES: One readable line for one file's report, so a bad file shows a clear message, not a traceback.
+# ISOLATED
+def describe(report):
+    if "error" in report:
+        return f"{report['install']}: {report['file']}: NOT CHANGED - {report['error']}"
+    return json.dumps(report, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
@@ -116,7 +142,7 @@ def main():
     if not reports:
         print("No Windows Terminal settings file found (looked for Store, Preview, Canary and unpackaged installs). Nothing changed.")
     else:
-        print(json.dumps(reports, indent=2))
+        print("\n".join(describe(report) for report in reports))
     sys.exit(code)
 
 

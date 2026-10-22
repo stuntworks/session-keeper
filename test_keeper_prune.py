@@ -313,15 +313,37 @@ class ClockGuardTests(unittest.TestCase):
             self.auto(folder)   # next hourly run finishes the rest
             self.assertEqual(sum(1 for p in old if p.exists()), 0)
 
-    def test_manual_run_not_blocked_but_warns(self):
+    def test_manual_apply_blocked_when_clock_trips(self):
         with tempfile.TemporaryDirectory() as folder:
             now = datetime.now().astimezone()
             old = [write(folder, now - timedelta(days=370, minutes=m)) for m in (0, 2, 4)]
             write(folder, now)
             report = run_prune(folder, apply=True)
-            self.assertFalse(any(p.exists() for p in old[1:]))
+            self.assertTrue(all(p.exists() for p in old))
+            self.assertEqual(report["deleted"], 0)
             self.assertIn("warning", report)
+            text = keeper_prune.report_text(report)
+            self.assertIn("WARNING", text)
+            self.assertIn("--force", text)
+            self.assertLess(text.index("WARNING"), text.index("snapshot files"))
+
+    def test_manual_apply_force_deletes_and_warns(self):
+        with tempfile.TemporaryDirectory() as folder:
+            now = datetime.now().astimezone()
+            old = [write(folder, now - timedelta(days=370, minutes=m)) for m in (0, 2, 4)]
+            write(folder, now)
+            report = run_prune(folder, apply=True, force=True)
+            self.assertFalse(any(p.exists() for p in old[1:]))
             self.assertIn("WARNING", keeper_prune.report_text(report))
+
+    def test_dry_run_shows_warning_first(self):
+        with tempfile.TemporaryDirectory() as folder:
+            now = datetime.now().astimezone()
+            for m in (0, 2, 4):
+                write(folder, now - timedelta(days=370, minutes=m))
+            write(folder, now)
+            text = keeper_prune.report_text(run_prune(folder))
+            self.assertTrue(text.startswith("WARNING"))
 
 
 class CliTests(unittest.TestCase):
@@ -334,10 +356,13 @@ class CliTests(unittest.TestCase):
         return command
 
     def test_prune_is_dry_run_by_default(self):
-        self.assertEqual(self.run_main().call_args.kwargs, {"apply": False})
+        self.assertEqual(self.run_main().call_args.kwargs, {"apply": False, "force": False})
 
     def test_prune_apply(self):
-        self.assertEqual(self.run_main("--apply").call_args.kwargs, {"apply": True})
+        self.assertEqual(self.run_main("--apply").call_args.kwargs, {"apply": True, "force": False})
+
+    def test_prune_apply_force(self):
+        self.assertEqual(self.run_main("--apply", "--force").call_args.kwargs, {"apply": True, "force": True})
 
     def test_report_text_dry_run(self):
         with tempfile.TemporaryDirectory() as folder:

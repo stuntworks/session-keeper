@@ -145,8 +145,9 @@ def clock_problem(items, now):
 # AFFECTS: apply=False is read-only. Returns counts, oldest kept / newest deleted names, a sample.
 # automatic=True (the recorder) skips entirely when clock_problem finds something (report["skipped"]
 # holds the reason) and deletes at most MAX_AUTO_DELETE files, oldest first. The manual command passes
-# automatic=False: it only reports the problem under report["warning"] and proceeds.
-def run_prune(data_dir=DATA, now=None, apply=False, automatic=False):
+# automatic=False: with a clock problem it reports report["warning"] and, on apply, deletes NOTHING
+# (report["blocked"]) unless force=True.
+def run_prune(data_dir=DATA, now=None, apply=False, automatic=False, force=False):
     now = (now or datetime.now()).astimezone()
     items = scan(data_dir)
     problem = clock_problem(items, now)
@@ -168,7 +169,10 @@ def run_prune(data_dir=DATA, now=None, apply=False, automatic=False):
               "sample": gone[::max(1, len(gone) // SAMPLE)][:SAMPLE], "deleted": 0, "errors": []}
     if problem:
         report["warning"] = problem
-    if apply and delete:
+    blocked = bool(problem and apply and not force)
+    if blocked:
+        report["blocked"] = True
+    if apply and delete and not blocked:
         report["errors"] = delete_files(data_dir, delete)
         report["deleted"] = sum(1 for path in delete if not Path(path).exists())
     return report
@@ -177,14 +181,17 @@ def run_prune(data_dir=DATA, now=None, apply=False, automatic=False):
 # WHAT IT DOES: Turns a run_prune report into the lines the command prints.
 # ISOLATED
 def report_text(report):
-    lines = [("APPLIED" if report["apply"] else "DRY RUN (nothing deleted; add --apply to delete)"),
+    lines = []
+    if report.get("warning"):
+        lines.append(f"WARNING: PC clock looks wrong: {report['warning']}")
+    if report.get("blocked"):
+        lines.append("NOTHING DELETED because of the clock warning. To delete anyway, run: prune --apply --force")
+    lines += [("APPLIED" if report["apply"] and not report.get("blocked") else "NOT APPLIED" if report.get("blocked") else "DRY RUN (nothing deleted; add --apply to delete)"),
              f"snapshot files: {report['total']}", f"keep: {report['keep']}", f"delete: {report['delete']}",
              f"unreadable or other names (never deleted): {report['untouched_unreadable_or_other']}",
              f"oldest kept: {report['oldest_kept']}", f"newest deleted: {report['newest_deleted']}"]
     if report["apply"]:
         lines.append(f"deleted: {report['deleted']}")
-    if report.get("warning"):
-        lines.append(f"WARNING: PC clock looks wrong: {report['warning']}")
     lines += [f"errors: {len(report['errors'])}"] + [f"  {error}" for error in report["errors"][:SAMPLE]]
     lines += ["sample of files to delete:"] + [f"  {name}" for name in report["sample"]]
     return "\n".join(lines)

@@ -171,6 +171,15 @@ class PickerWindowTests(unittest.TestCase):
         self.assertEqual(view.map.tab_state("0:0"), "live")
         self.assertEqual(view.map.tab_state("1:2"), "unknown")
         self.assertTrue(view.map.tab_names("1:2")[0].startswith("? "))
+        self.assertIn("not identified", view.map.tab_names("1:2")[1])
+
+    def test_matched_tab_without_folder_says_folder_not_recorded(self):
+        view = self.view
+        view.snapshot["windows"][1]["tabs"][2] = {"outcome": "MATCHED", "sessionId": "zzz", "strippedTitle": "nofolder"}
+        label, hover = view.map.tab_names("1:2")
+        self.assertTrue(label.startswith("? "))
+        self.assertIn("folder not recorded", hover)
+        self.assertNotIn("not identified", hover)
 
     def test_title_bar_selects_then_unselects_that_window(self):
         self.view.map.toggle_window(1)
