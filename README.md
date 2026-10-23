@@ -6,6 +6,8 @@ Built using the [VozSay](https://vozsay.com) speech-to-text app: we talked to ou
 
 If you run many AI coding sessions at once, a crash or reboot loses all of them: which conversation was in which tab, which tabs shared a window, and where each window sat on screen. Session Keeper records that layout in the background. After a crash, you pick which sessions to bring back, and it reopens each one in its own window, tab order and screen position, resuming its own conversation.
 
+> **Work in progress.** We use it every day, but if something goes wrong, please open an issue on this page.
+
 ## What you need
 
 - Windows 10 or 11 with **Windows Terminal**
@@ -100,7 +102,6 @@ Session Keeper is an independent project. It is not made or endorsed by Anthropi
 - If Claude Code asks whether you trust a folder after a restore, answer it in that tab.
 - PowerShell and Windows Terminal profiles only. Git Bash and WSL tabs are not covered, and the **Copy command** lines are for PowerShell.
 - Session Keeper reads the session files Claude Code and Codex CLI save on your PC. Their format is not a public interface, so an update to either tool can break matching until Session Keeper is updated.
-- Work in progress. Reports and suggestions welcome.
 
 ## License
 
