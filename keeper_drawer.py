@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Right-side details drawer for the recovery map (dark, slides in) | Full history: git log
+# Last modified: 2026-10-22 | Change: Open it for me / Open a second copy; stop reports show each tab's command with Copy and Open | Full history: git log
 """The details drawer: a hint, one tab's details and exact resume command, or a preview/restart report.
 Display only. Restart this tab calls back into the recovery window, which runs the normal guarded restore."""
 
@@ -61,7 +61,7 @@ class Drawer(tk.Frame):
         self.detail = frame = tk.Frame(self.inner, background=BEZEL)
         buttons = tk.Frame(frame, background=BEZEL)
         buttons.pack(side="bottom", fill="x", padx=pad, pady=(px(10), pad))
-        self.restart_btn = FlatButton(buttons, t, "Restart this tab", self.restart_one, kind="go", icon=IC_RESTART)
+        self.restart_btn = FlatButton(buttons, t, "Open it for me", self.restart_one, kind="go", icon=IC_RESTART)
         self.restart_btn.pack(side="bottom", fill="x", pady=(px(14), 0))
         self.copy_btn = FlatButton(buttons, t, "Copy command", self.copy_detail, kind="line", icon=IC_COPY)
         self.copy_btn.pack(side="bottom", fill="x")
@@ -91,18 +91,19 @@ class Drawer(tk.Frame):
         self.status_pill.grid(row=3, column=1, sticky="w", pady=px(6))
         self.facts = tk.Frame(frame, background=BEZEL)
         self.facts.pack(fill="x", padx=pad)
-        label(frame, t, "COMMAND", kind="display", size=18, colour=DIM, anchor="w").pack(
-            fill="x", padx=pad, pady=(px(14), px(8)))
+        # The command sits right under the name, so a long fact list can never push it out of view.
+        label(frame, t, "RESTART CODE", kind="display", size=18, colour=DIM, anchor="w").pack(
+            fill="x", padx=pad, pady=(px(14), px(8)), before=self.rows)
         self.command_box = tk.Text(frame, height=3, wrap="char", font=t.font("mono", 17), background=TERM,
                                    foreground=INK, insertbackground=INK, selectbackground=OPEN_FILL,
                                    relief="flat", highlightthickness=1, highlightbackground=EDGE,
                                    highlightcolor=EDGE, padx=px(14), pady=px(12))
-        self.command_box.pack(fill="x", padx=pad)
+        self.command_box.pack(fill="x", padx=pad, before=self.rows)
         # Read-only but selectable: swallow typing, allow Ctrl+C / Ctrl+A / arrows.
         self.command_box.bind("<Key>", lambda event: None if (event.state & 4 and event.keysym.lower() in "ca")
                               or event.keysym in ("Left", "Right", "Up", "Down", "Home", "End") else "break")
         self.note_label = label(frame, t, size=19, colour=AMBER, anchor="w", justify="left", wraplength=px(390))
-        self.note_label.pack(fill="x", padx=pad, pady=(px(14), 0))
+        self.note_label.pack(fill="x", padx=pad, pady=(px(14), 0), before=self.rows)
 
     # WHAT IT DOES: Builds the report view used for Preview and restart results.
     def build_message(self):
@@ -118,7 +119,10 @@ class Drawer(tk.Frame):
         self.message_text = tk.Text(frame, wrap="word", font=t.font("body", 19), background=BEZEL, foreground=INK,
                                     relief="flat", highlightthickness=0, padx=0, pady=0, spacing1=px(6),
                                     spacing3=px(6))
-        self.message_text.pack(fill="both", expand=True, padx=pad, pady=(0, pad))
+        # Below the report: the explicit go-ahead button (if any) and each affected tab's exact command.
+        self.message_extra = tk.Frame(frame, background=BEZEL)
+        self.message_extra.pack(side="bottom", fill="x", padx=pad, pady=(0, pad))
+        self.message_text.pack(fill="both", expand=True, padx=pad, pady=(0, px(10)))
         self.message_text.tag_configure("warn", foreground=AMBER)
         self.message_text.tag_configure("dim", foreground=DIM)
 
@@ -170,7 +174,8 @@ class Drawer(tk.Frame):
         note = info["note"]
         self.note_label.configure(text=note or "")
         self.copy_btn.configure(state="normal" if info["can_copy"] else "disabled")
-        self.restart_btn.configure(state="normal" if info["can_restart"] else "disabled")
+        self.restart_btn.configure(state="normal" if info["can_restart"] else "disabled",
+                                   text="Open a second copy" if info.get("second_copy") else "Open it for me")
         self.show_facts(info.get("row"))
         self.switch("detail", changed)
 
@@ -242,8 +247,11 @@ class Drawer(tk.Frame):
         grid.pack(fill="x", pady=(px(8), 0))
 
     # WHAT IT DOES: Shows a report (Preview or restart result). tone "warn" colours the lines amber.
-    def show_message(self, title, lines, notes=()):
+    # action: optional (button text, callback), e.g. the explicit "Restore anyway".
+    # commands: optional [{"key", "title", "text", "can_open"}], one exact resume command per affected tab.
+    def show_message(self, title, lines, notes=(), action=None, commands=()):
         self.key = None
+        self.fill_message_extra(action, commands)
         self.message_title.configure(text=title)
         self.message_text.configure(state="normal")
         self.message_text.delete("1.0", "end")
@@ -253,6 +261,46 @@ class Drawer(tk.Frame):
             self.message_text.insert("end", note + "\n", "warn")
         self.message_text.configure(state="disabled")
         self.switch("message", True)
+
+    # WHAT IT DOES: Rebuilds the go-ahead button and the per-tab command boxes under a report.
+    # DEPENDS ON: Theme tokens; on_restart(key) is the same guarded single-tab open as the details drawer.
+    # AFFECTS: Widgets and clipboard only; nothing opens unless a button is clicked.
+    def fill_message_extra(self, action, commands):
+        t, px = self.theme, self.theme.px
+        for child in self.message_extra.winfo_children():
+            child.destroy()
+        commands = list(commands or [])
+        if commands:
+            label(self.message_extra, t, "OPEN THEM YOURSELF", kind="display", size=18, colour=DIM,
+                  anchor="w").pack(fill="x", pady=(0, px(6)))
+        for entry in commands[:4]:
+            label(self.message_extra, t, entry["title"], size=19, anchor="w", justify="left",
+                  wraplength=px(400)).pack(fill="x", pady=(px(6), px(4)))
+            box = tk.Text(self.message_extra, height=2, wrap="char", font=t.font("mono", 16), background=TERM,
+                          foreground=INK, relief="flat", highlightthickness=1, highlightbackground=EDGE,
+                          highlightcolor=EDGE, padx=px(10), pady=px(8))
+            box.insert("1.0", entry["text"])
+            box.configure(state="disabled")
+            box.pack(fill="x")
+            row = tk.Frame(self.message_extra, background=BEZEL)
+            row.pack(fill="x", pady=(px(6), 0))
+            copy = FlatButton(row, t, "Copy command", lambda text=entry["text"]: self.copy_text(text), kind="line",
+                              icon=IC_COPY)
+            copy.pack(side="left")
+            if entry.get("can_open") and self.on_restart:
+                FlatButton(row, t, "Open it for me", lambda key=entry["key"]: self.on_restart(key), kind="go",
+                           icon=IC_RESTART).pack(side="left", padx=(px(10), 0))
+        if len(commands) > 4:
+            label(self.message_extra, t, f"and {len(commands) - 4} more: click each tab on the map to see its command.",
+                  size=18, colour=DIM, anchor="w").pack(fill="x", pady=(px(6), 0))
+        if action:
+            text, callback = action
+            FlatButton(self.message_extra, t, text, callback, kind="go").pack(fill="x", pady=(px(14), 0))
+
+    def copy_text(self, text):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
 
     # WHAT IT DOES: Copies exactly the command text shown; the button says "Copied" for 1.5 s.
     def copy_detail(self):

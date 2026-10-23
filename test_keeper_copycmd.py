@@ -1,4 +1,4 @@
-# Last modified: 2026-10-20 | Change: Tests for the Copy command text builder | Full history: git log
+# Last modified: 2026-10-22 | Change: Copy command is two plain lines, folder then resume | Full history: git log
 """Fake snapshot rows only: no real session IDs, nothing is launched."""
 
 import base64
@@ -20,7 +20,7 @@ OT = os.path.join(_ROOT, "Other")
 os.makedirs(VD)
 os.makedirs(OT)
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
-SPECIAL = ["a$(calc)b", "my$stuff", "back`tick", "it's", "a&b", "semi;colon", "sp ace", "café 日本"]
+SPECIAL = ["a$(calc)b", "my$stuff", "br[ack]et", "back`tick", "it's", "a&b", "semi;colon", "sp ace", "café 日本"]
 
 
 def special_dirs():
@@ -46,25 +46,24 @@ def row(session_id=ID_A, kind="claude", title="ProjectB", cwd=VD, key="0:0"):
 # DEPENDS ON: keeper_copycmd.build_resume_text and keeper_restore.resume_program.
 # AFFECTS: Test run only.
 class CopyCommandTests(unittest.TestCase):
-    def test_single_claude_tab_is_one_powershell_line(self):
+    def test_single_claude_tab_is_two_plain_lines(self):
         self.assertEqual(build_resume_text([row()]),
-                         "if (Set-Location -LiteralPath '" + VD + "' -PassThru) { claude -r " + ID_A + " }")
+                         "cd -LiteralPath '" + VD + "'" + chr(10) + "claude -r " + ID_A)
 
     def test_codex_uses_the_restorer_command(self):
         text = build_resume_text([row(ID_B, "codex", "Other", OT)])
-        self.assertEqual(text, "if (Set-Location -LiteralPath '" + OT + "' -PassThru) { " +
-                         " ".join(resume_program(row(ID_B, "codex"))) + " }")
-        self.assertIn("{ codex resume " + ID_B + " }", text)
+        self.assertEqual(text, "cd -LiteralPath '" + OT + "'" + chr(10) + " ".join(resume_program(row(ID_B, "codex"))))
+        self.assertIn(chr(10) + "codex resume " + ID_B, text)
 
     def test_multiple_tabs_have_comment_and_blank_line(self):
         text = build_resume_text([row(), row(ID_B, "codex", "Other", OT, "0:1")])
-        first = "if (Set-Location -LiteralPath '" + VD + "' -PassThru) { claude -r " + ID_A + " }"
-        second = "if (Set-Location -LiteralPath '" + OT + "' -PassThru) { codex resume " + ID_B + " }"
+        first = "cd -LiteralPath '" + VD + "'" + chr(10) + "claude -r " + ID_A
+        second = "cd -LiteralPath '" + OT + "'" + chr(10) + "codex resume " + ID_B
         self.assertEqual(text, "# ProjectB" + chr(10) + first + chr(10) + chr(10) + "# Other" + chr(10) + second)
 
     def test_single_quote_is_doubled(self):
         path = special_dirs()["it's"]
-        self.assertIn("-LiteralPath '" + path.replace("'", "''") + "'", build_resume_text([row(cwd=path)]))
+        self.assertIn("cd -LiteralPath '" + path.replace("'", "''") + "'", build_resume_text([row(cwd=path)]))
 
     def test_bad_session_id_refused(self):
         with self.assertRaises(ValueError):
@@ -126,13 +125,16 @@ class CopyCommandPowerShellTests(unittest.TestCase):
         self.assertEqual(ran, ["RAN:" + path + "|-r " + ID_A], done.stderr)
         self.assertFalse(os.path.exists(marker))
 
-    def test_folder_removed_after_copy_does_not_run_resume(self):
+    def test_folder_removed_after_copy_is_not_where_resume_runs(self):
+        # The lines are fixed at copy time. Removing the folder afterwards makes cd fail.
+        # The resume line is plain, so the stand-in still runs in the folder PowerShell started in.
         path = os.path.join(_ROOT, "vanishing")
         os.makedirs(path, exist_ok=True)
         text = build_resume_text([row(cwd=path)])
         os.rmdir(path)
-        ran, done = self.run_line(text)
-        self.assertEqual(ran, [])
+        ran, done = self.run_line(text, start=_ROOT)
+        self.assertEqual(ran, ["RAN:" + _ROOT + "|-r " + ID_A], done.stderr)
+        self.assertNotIn("vanishing", "\n".join(ran))
 
     def test_multi_row_runs_both(self):
         ran, done = self.run_line(build_resume_text([row(), row(ID_B, "codex", "Other", OT, "0:1")]))

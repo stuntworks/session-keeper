@@ -1,8 +1,7 @@
-# Last modified: 2026-10-19 | Change: Tests for adding a closed tab back into its own open window | Full history: git log
+# Last modified: 2026-10-22 | Change: Open-window tests take a throwaway restore lock | Full history: git log
 """Fakes only: no terminal is opened, focused, or closed."""
 
 import unittest
-from contextlib import nullcontext
 from unittest.mock import patch
 
 from keeper_core import plan_restore
@@ -66,18 +65,20 @@ class PlanAddToOpenWindowTests(unittest.TestCase):
                                 live_groups=[live_group(500, FOUR, extra=("PowerShell",))])
         self.assertEqual(plans[0]["mode"], "add")
 
-    def test_foreign_window_on_the_spot_is_still_skipped(self):
+    # Owner 2026-10-22: a foreign window no longer blocks; ours opens on top of it, never into it.
+    def test_foreign_window_on_the_spot_opens_on_top(self):
         plans, warnings = plan_restore(saved(), {"0:4"}, set(), [probe_window(900, ["Unrelated"])],
                                        live_groups=[live_group(900, [], extra=("Unrelated",))])
-        self.assertEqual(plans, [])
-        self.assertTrue(any("Skipped occupied position: green" in w for w in warnings))
+        self.assertTrue(plans[0]["on_top"])
+        self.assertNotEqual(plans[0].get("mode"), "add")
+        self.assertIn("Unrelated", plans[0]["covering"])
 
-    def test_siblings_not_verifiable_by_id_keeps_old_skip(self):
+    def test_siblings_not_verifiable_by_id_opens_on_top_never_into_it(self):
         unidentified = {"hwnd": 500, **RECT, "tabs": [{"strippedTitle": t, "outcome": "AMBIGUOUS"} for t in TITLES[:4]]}
         plans, warnings = plan_restore(saved(), {"0:4"}, set(FOUR), [probe_window(500, TITLES[:4])],
                                        live_groups=[unidentified])
-        self.assertEqual(plans, [])
-        self.assertTrue(any("occupied" in w for w in warnings))
+        self.assertTrue(plans[0]["on_top"])
+        self.assertNotIn("target_hwnd", plans[0])
 
     def test_siblings_split_across_windows_is_not_guessed(self):
         other = {"x": 3000, "y": 400, "w": 1600, "h": 900}
@@ -120,9 +121,8 @@ class RestoreAddToOpenWindowTests(unittest.TestCase):
         def launched(name, row):
             screen["now"] = after if after is not None else screen["now"]
         live = set(FOUR) if live_ids is None else live_ids
-        with patch("keeper_restore.exclusive_operation", lambda name: nullcontext()), \
-             patch("keeper_restore.live_session_ids", return_value=live),              patch("keeper_restore.read_windows", side_effect=lambda: screen["now"]),              patch("keeper_restore.read_live_groups", return_value=groups or [live_group(500, FOUR)]),              patch("keeper_restore.read_monitors", return_value=[{"x": 0, "y": 0, "w": 3840, "h": 2088, "primary": True}]),              patch("keeper_restore.load_created_windows", return_value=list(owned)),              patch("keeper_restore.read_boot_id", return_value="B"),              patch("keeper_restore.launch_tab", side_effect=launched) as launch,              patch("keeper_restore.find_new_window") as find,              patch("keeper_restore.place_new_window") as place,              patch("keeper_target.bring_to_front", return_value=front) as focus,              patch("keeper_restore.wait_for_session", return_value=True),              patch("keeper_restore.time.sleep"):
-            restored, warnings = restore_selected(saved(), set(keys), dry_run)
+        with patch("keeper_restore.live_session_ids", return_value=live),              patch("keeper_restore.read_windows", side_effect=lambda: screen["now"]),              patch("keeper_restore.read_live_groups", return_value=groups or [live_group(500, FOUR)]),              patch("keeper_restore.read_monitors", return_value=[{"x": 0, "y": 0, "w": 3840, "h": 2088, "primary": True}]),              patch("keeper_restore.load_created_windows", return_value=list(owned)),              patch("keeper_restore.read_boot_id", return_value="B"),              patch("keeper_restore.launch_tab", side_effect=launched) as launch,              patch("keeper_restore.find_new_window") as find,              patch("keeper_restore.place_new_window") as place,              patch("keeper_target.bring_to_front", return_value=front) as focus,              patch("keeper_restore.wait_for_session", return_value=True),              patch("keeper_restore.time.sleep"):
+            restored, warnings = restore_selected(saved(), set(keys), dry_run, lock_name="unittest-restore")
         find.assert_not_called()
         place.assert_not_called()
         return restored, warnings, launch, focus

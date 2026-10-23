@@ -1,10 +1,11 @@
-# Last modified: 2026-10-22 | Change: Exact map: real window spots, hidden/minimised windows on per-monitor taskbars | Full history: git log
+# Last modified: 2026-10-22 | Change: Monitors drawn as real monitors with their real names and wallpapers | Full history: git log
 """The monitor map IS the menu. Display only: it never launches, moves or closes anything."""
 
 import tkinter as tk
 from tkinter import ttk
 
 from keeper_chooser import captured, clock
+from keeper_desktop_look import match, tinted_desktop
 from keeper_drawer import Drawer
 from keeper_map_layout import exact_layout, split_windows
 from keeper_tabdetails import tab_details
@@ -42,6 +43,7 @@ class SnapshotMap(tk.Frame):
         self.tab_boxes, self.homes, self.redraw_job, self.size = {}, {}, None, (1400, 700)
         self.bar_boxes, self.hidden, self.overflow = {}, set(), {}
         self.menu_window, self.menu_rows, self.menu_hit = None, {}, False
+        self.look, self.photos = [], {}         # this PC's monitor names and wallpapers, if read
         self.canvas.bind("<Button-1>", self.outside_click, add="+")
         self.winfo_toplevel().bind("<Escape>", lambda event: self.close_menu(), add="+")
         self.canvas.bind("<Configure>", self.on_resize)
@@ -113,7 +115,8 @@ class SnapshotMap(tk.Frame):
         seen = "Running now" if state == "live" else (f"{moment:%b %d}, {clock(moment)}" if moment else "Unknown")
         row = self.rows.get(key)
         return {**info, "state": state, "kind": row["kind"] if row else None, "where": f"{place} · tab {tab_index + 1}",
-                "seen": seen, "row": row, "can_restart": state in ("missing", "selected") and info["can_copy"]}
+                "seen": seen, "row": row, "can_restart": (state in ("missing", "selected") and info["can_open"])
+                or (state == "live" and info["second_copy"])}
 
     # WHAT IT DOES: Fills the drawer for a tab, or shows the hint when key is None.
     def fill_detail(self, key):
@@ -229,8 +232,8 @@ class SnapshotMap(tk.Frame):
         placed, minimised = split_windows(windows)
         width, height = self.size
         screens, boxes, self.homes, _ = exact_layout(self.snapshot.get("monitors"), windows, placed, width,
-                                                     max(height - px(28), px(240)), gap=px(36), side=px(16),
-                                                     top=px(16), bar=px(64), chin=px(40))
+                                                     max(height - px(26), px(240)), gap=px(44), side=px(20),
+                                                     top=px(20), bar=px(64), chin=px(46), stand=px(64))
         self.hidden = hidden_windows(windows, placed)
         bars = taskbar_buttons(self.snapshot.get("monitors"), windows, self.hidden, minimised)
         names = self.monitor_names(screens)
@@ -238,7 +241,8 @@ class SnapshotMap(tk.Frame):
         order = sorted(screens, key=lambda screen: (screen["bezel"]["x"], screen["bezel"]["y"]))
         for position, screen in enumerate(order):
             bottom = max(bottom, self.painter.draw_bezel(screen, names[screen["number"]],
-                                                         TINTS[position % len(TINTS)]))
+                                                         TINTS[position % len(TINTS)],
+                                                         self.desktop(screen, TINTS[position % len(TINTS)])))
         for index in reversed(stack_order(windows)):
             if index in boxes and index not in self.hidden:
                 self.draw_window(index, boxes[index])
@@ -255,7 +259,8 @@ class SnapshotMap(tk.Frame):
             self.scroll.pack_forget()
             canvas.yview_moveto(0)
 
-    # WHAT IT DOES: "Monitor 1 · Primary" labels, numbered left to right.
+    # WHAT IT DOES: Chin labels, numbered left to right, plus the model name when this PC knows it
+    # ("Monitor 1 · BenQ PD3200U · Primary", else "Monitor 1 · Primary").
     def monitor_names(self, screens):
         saved = self.snapshot.get("monitors") or []
         order = sorted(screens, key=lambda screen: (screen["bezel"]["x"], screen["bezel"]["y"]))
@@ -263,8 +268,42 @@ class SnapshotMap(tk.Frame):
         for position, screen in enumerate(order):
             number = screen["number"]
             main = " · Primary" if number < len(saved) and saved[number].get("primary") else ""
-            names[number] = f"Monitor {position + 1}{main}" if saved else "Saved screen"
+            known = match(self.look, saved[number]) if number < len(saved) else None
+            model = (known or {}).get("name")
+            label = f"Monitor {position + 1}" + (f" · {model}" if model else "")
+            names[number] = f"{label}{main}" if saved else "Saved screen"
         return names
+
+    # WHAT IT DOES: Takes this PC's monitor names and wallpapers (read off the Tk thread) and redraws.
+    # DEPENDS ON: keeper_desktop_look.read_desktop_look output; [] keeps the tinted desktops.
+    # AFFECTS: Display only; nothing here is saved.
+    def set_look(self, look):
+        self.look, self.photos = list(look or []), {}
+        self.draw()
+
+    # WHAT IT DOES: What fills one screen: the matching monitor's dimmed wallpaper scaled to cover the screen,
+    # its solid colour, else a tinted stand-in wallpaper (None without Pillow: the painter's plain gradient).
+    # DEPENDS ON: Pillow for pictures; made here on the Tk thread and kept so Tk does not drop them.
+    def desktop(self, screen, tint):
+        saved = self.snapshot.get("monitors") or []
+        known = match(self.look, saved[screen["number"]]) if screen["number"] < len(saved) else None
+        if known and known.get("image") is None:
+            if known.get("colour"):
+                return known["colour"]
+            known = None
+        size = (max(1, round(screen["screen"]["w"])), max(1, round(screen["screen"]["h"])))
+        source = id(known["image"]) if known else tint
+        key = (source, size)
+        if key not in self.photos:
+            for old in [old for old in self.photos if old[0] == source]:
+                del self.photos[old]            # keep one size per picture, not one per resize
+            try:
+                from PIL import Image, ImageOps, ImageTk
+                picture = ImageOps.fit(known["image"], size, Image.BILINEAR) if known else tinted_desktop(tint, size)
+                self.photos[key] = ImageTk.PhotoImage(picture, master=self.canvas)
+            except Exception:
+                return None
+        return self.photos[key]
 
     # WHAT IT DOES: Draws one saved window as a Windows Terminal window and binds its clicks.
     def draw_window(self, index, box):

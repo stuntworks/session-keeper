@@ -151,7 +151,7 @@ def recovery_rows(snapshot: dict) -> list[dict]:
 # DANGER ZONE HIGH: owned_windows reuse / breaks: moves tabs into a stranger's window / depends on: exact hwnd, group and tab-title match.
 # live_groups may be a list or a zero-argument reader; it is read only when a selected group has a live sibling.
 # choices maps a saved window index to "on_top" or "close_empty" and is set only by an explicit user click.
-# blocked, when a list, receives each skipped occupied spot so the caller can ask the user about it.
+# blocked, when a list, receives each occupied spot so the caller can offer to close empty terminals there.
 def plan_restore(snapshot: dict, selected_keys: set[str], live_ids: set[str],
                  current_windows: list[dict], monitors=None,
                  owned_windows=None, live_groups=None, choices=None,
@@ -164,7 +164,8 @@ def plan_restore(snapshot: dict, selected_keys: set[str], live_ids: set[str],
     for row in selected:
         session_id = row["session_id"]
         if session_id in live_ids or session_id in seen_ids:
-            warnings.append(f"Skipped already open or duplicate: {row['title']}")
+            warnings.append(f"Not opened twice: '{row['title']}' is already open (or was selected twice). "
+                            "Nothing to fix; use its open tab.")
             continue
         seen_ids.add(session_id)
         by_window.setdefault(row["window_index"], []).append(row)
@@ -186,16 +187,15 @@ def plan_restore(snapshot: dict, selected_keys: set[str], live_ids: set[str],
             from keeper_home import SPLIT, home_window
             home = home_window(saved_ids, live_ids, reader.get())
             if home == SPLIT:
-                warnings.append("Its other tabs are open in more than one window, so its place is uncertain; "
-                                f"skipped: {rows[0]['title']}")
+                warnings.append(f"Not opened: '{rows[0]['title']}'. Its other tabs are open in more than one window, "
+                                "so Session Keeper cannot tell which window it belongs in. To fix: drag those tabs "
+                                "into one window, then press Restart selected again, or use Copy command for this tab.")
                 continue
             if home:
                 plans.append(add_plan(home, rows, owned_windows))
                 continue
         if occupying and not verified_neighbors:
-            plan = occupied_plan(window_index, rect, rows, occupying, choices, warnings, blocked)
-            if plan:
-                plans.append(plan)
+            plans.append(occupied_plan(window_index, rect, rows, occupying, choices, blocked, monitors))
             continue
         plans.append({"rect": rect, "tabs": rows})
     return plans, warnings
@@ -215,6 +215,12 @@ class LazyGroups:
         return self.value
 
 
+# WHAT IT DOES: The fix-it line for a saved window whose position was never recorded.
+def missing_position(title):
+    return (f"Not opened: '{title}'. Its saved window position is missing, so Session Keeper does not know where "
+            "to put it. To fix: select the tab and press Copy command, then paste it into any terminal.")
+
+
 # WHAT IT DOES: Returns the saved rectangle to restore, moving minimised or off-screen windows onto a monitor.
 # DEPENDS ON: The saved window position and current monitors.
 # AFFECTS: Warnings explain every position change; None means the group is skipped.
@@ -225,13 +231,13 @@ def saved_rect(rows, monitors, warnings):
     if all(type(value) is int for value in rect.values()) and is_minimised(rect):
         fallback = minimised_rect(monitors)
         if fallback is None:
-            warnings.append(f"Skipped window with missing position: {rows[0]['title']}")
+            warnings.append(missing_position(rows[0]["title"]))
             return None
         warnings.append(f"Was minimised; opening on the main monitor: {rows[0]['title']}")
         return fallback
     if (not all(type(value) is int for value in rect.values())
             or rect["w"] < 200 or rect["h"] < 150):
-        warnings.append(f"Skipped window with missing position: {rows[0]['title']}")
+        warnings.append(missing_position(rows[0]["title"]))
         return None
     if monitors is not None:
         from keeper_display import keep_visible
@@ -276,20 +282,45 @@ def add_plan(home, rows, owned_windows):
     return plan
 
 
-# WHAT IT DOES: Applies the user's explicit choice for a spot covered by another window, else skips it.
-# DEPENDS ON: choices from the confirm dialog; absent choices mean the old skip.
-# AFFECTS: Never stacks or closes anything without a recorded click.
-def occupied_plan(window_index, rect, rows, occupying, choices, warnings, blocked):
-    choice = (choices or {}).get(window_index)
-    if choice == "on_top":
-        return {"rect": rect, "tabs": rows, "on_top": True}
-    if choice == "close_empty":
-        return {"rect": rect, "tabs": rows, "close_hwnds": [window.get("hwnd") for window in occupying]}
-    warnings.append(f"Skipped occupied position: {rows[0]['title']}")
+# WHAT IT DOES: Plans a spot covered by another window: open on top of it, or close it on the user's explicit choice.
+# DEPENDS ON: choices from the confirm dialog ("close_empty" only ever comes from a click).
+# AFFECTS: Owner rule 2026-10-22: a covered spot never blocks; nothing closes without a recorded click.
+def occupied_plan(window_index, rect, rows, occupying, choices, blocked, monitors=None):
     if blocked is not None:
         blocked.append({"window_index": window_index, "title": rows[0]["title"], "rect": rect,
                         "occupants": [dict(window) for window in occupying]})
-    return None
+    if (choices or {}).get(window_index) == "close_empty":
+        return {"rect": rect, "tabs": rows, "close_hwnds": [window.get("hwnd") for window in occupying]}
+    return {"rect": rect, "tabs": rows, "on_top": True,
+            "covering": "; ".join(describe_window(window, monitors) for window in occupying)}
+
+
+# WHAT IT DOES: Names a window in plain words: its tab titles and which monitor it is on.
+# DEPENDS ON: Probe tab titles (strings or tab dicts) and current monitors.
+# AFFECTS: Text only.
+def describe_window(window, monitors=None):
+    titles = [strip_leading_glyphs(tab if isinstance(tab, str) else (tab.get("strippedTitle") or tab.get("rawTitle") or ""))
+              for tab in window.get("tabs") or []]
+    titles = [title for title in titles if title]
+    name = "the window with tabs " + ", ".join(f"'{title}'" for title in titles[:3]) if titles else "an untitled window"
+    if len(titles) > 3:
+        name += f" and {len(titles) - 3} more"
+    where = monitor_label(window, monitors)
+    return f"{name} on {where}" if where else name
+
+
+# WHAT IT DOES: Says which monitor (1, 2, ...) holds a rectangle's centre, or "" when unknown.
+# DEPENDS ON: Monitors in keeper_display.read_monitors order.
+# AFFECTS: Text only.
+def monitor_label(rect, monitors):
+    try:
+        cx, cy = rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2
+    except (KeyError, TypeError):
+        return ""
+    for number, monitor in enumerate(monitors or [], start=1):
+        if monitor["x"] <= cx < monitor["x"] + monitor["w"] and monitor["y"] <= cy < monitor["y"] + monitor["h"]:
+            return f"monitor {number}"
+    return ""
 
 
 # WHAT IT DOES: Finds the Session Keeper-made window that is the only occupant of a saved spot and holds only that group's tabs.

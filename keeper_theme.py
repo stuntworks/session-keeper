@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Dark theme tokens, scaled fonts, contrast check and flat buttons for the Tk screens | Full history: git log
+# Last modified: 2026-10-22 | Change: Monitor hardware tones and the wallpaper brightness ceiling | Full history: git log
 """Colour, type and button styling shared by every Session Keeper window. Display only."""
 
 import ctypes
@@ -8,6 +8,8 @@ from tkinter import ttk
 
 # Colour tokens (from WORK/2026-10-21 frontend-design/recovery_screen.html, Dim lightened for 4.5:1).
 ROOM, BEZEL, EDGE = "#0E1217", "#1A1F27", "#2A313C"
+# Monitor frame outline: light enough to read as hardware against the dark room.
+MONITOR_EDGE = "#8C96A8"
 TERM, STRIP = "#0C0C0C", "#1F1F1F"
 INK, DIM = "#E6E9EF", "#C2C9D5"   # Dim brightened again (owner: brighter lettering), 7:1+ on every surface
 AMBER, GO, STEEL, STOP = "#F5A524", "#3DDC84", "#5B6575", "#F36D6A"  # Stop lightened from #F0524F for 7:1
@@ -18,6 +20,11 @@ BLACK = "#000000"
 TINTS = ("#152029", "#1D1B2E")     # monitor screens: 1 a cool teal slate, 2 an indigo slate, so they tell apart
 TASKBAR = "#0F1319"                # each monitor's taskbar strip
 OUTLINE = "#C85A74"                # burgundy edge round every saved terminal window
+# Monitor hardware on the map: a lit top edge, a darker chin, a recessed screen edge, a shadow on the desk.
+BEZEL_LIT, CHIN, RECESS, SHADOW = "#3A4351", "#141920", "#05070A", "#07090C"
+POWER = "#2F9E63"                  # the tiny power light in each chin
+# Desktop wallpaper is dimmed into this range: its brightest pixel keeps every text and outline readable.
+WALL_FLOOR, WALL_CEIL = "#07090C", "#2A3340"
 
 DISPLAY = "Bahnschrift SemiBold Condensed"
 BODY = "Segoe UI"
@@ -66,9 +73,12 @@ TEXT_PAIRS = {
     "ink on taskbar": (INK, TASKBAR), "dim on taskbar": (DIM, TASKBAR), "amber on taskbar": (AMBER, TASKBAR),
     **{f"ink on {tint}": (INK, tint) for tint in TINTS}, **{f"dim on {tint}": (DIM, tint) for tint in TINTS},
     **{f"amber on {tint}": (AMBER, tint) for tint in TINTS},
+    "ink on brightest wallpaper": (INK, WALL_CEIL), "dim on brightest wallpaper": (DIM, WALL_CEIL),
+    "amber on brightest wallpaper": (AMBER, WALL_CEIL), "ink on chin": (INK, CHIN),
 }
 OUTLINE_PAIRS = {"outline on room": (OUTLINE, ROOM), "outline on terminal": (OUTLINE, TERM),
-                 "outline on tab strip": (OUTLINE, STRIP), **{f"outline on {t}": (OUTLINE, t) for t in TINTS}}
+                 "outline on tab strip": (OUTLINE, STRIP), **{f"outline on {t}": (OUTLINE, t) for t in TINTS},
+                 "outline on brightest wallpaper": (OUTLINE, WALL_CEIL)}
 MIN_OUTLINE = 3.0                  # WCAG non-text contrast
 MIN_BODY, MIN_SECONDARY = 7.0, 4.5
 

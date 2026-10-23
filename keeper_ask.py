@@ -1,5 +1,6 @@
-# Last modified: 2026-10-21 | Change: Dark confirm dialog; Cancel keeps default focus | Full history: git log
-"""Asks before anything is closed or stacked. Default focus is Cancel. Only manual restores show it."""
+# Last modified: 2026-10-22 | Change: Asks only about empty terminals; in-use spots open on top without asking | Full history: git log
+"""Asks before an empty leftover terminal is closed. Default focus is Cancel. Only manual restores show it.
+Owner 2026-10-22: in-use spots are not asked about; the restored window opens on top of them."""
 
 import tkinter as tk
 
@@ -89,7 +90,7 @@ class OccupiedDialog(tk.Toplevel):
         self.cancel_button = FlatButton(buttons, theme, "Cancel", self.cancel, kind="line", width=170)
         self.cancel_button.pack(side="right")
         if empty:
-            FlatButton(buttons, theme, "Restart beside them", lambda: self.finish(BESIDE), kind="line").pack(
+            FlatButton(buttons, theme, "Restart on top of them", lambda: self.finish(BESIDE), kind="line").pack(
                 side="right", padx=px(14))
             FlatButton(buttons, theme, "Close empty ones and restart", lambda: self.finish(CLOSE),
                        kind="go").pack(side="right")

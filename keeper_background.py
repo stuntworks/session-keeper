@@ -1,8 +1,11 @@
-# Last modified: 2026-10-03 | Change: Keep recovery controls responsive during process scans | Full history: git log
+# Last modified: 2026-10-22 | Change: Name worker threads so tests can prove none outlive a Tk root | Full history: git log
 """Workers return results through a queue; only the UI thread touches Tk widgets."""
 
 import queue
 import threading
+
+# Every worker started here carries this name; tests use it to check no worker outlives a Tk root.
+WORKER_THREAD_NAME = "keeper-background"
 
 
 # WHAT IT DOES: Runs an operation away from the UI and returns its result to the Tk thread.
@@ -34,5 +37,5 @@ def run_background(root, action, on_success, on_error):
         else:
             on_error(result)
 
-    threading.Thread(target=work, daemon=True).start()
+    threading.Thread(target=work, daemon=True, name=WORKER_THREAD_NAME).start()
     root.after(100, poll)

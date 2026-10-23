@@ -1,11 +1,14 @@
-# Last modified: 2026-10-21 | Change: Screen layout half of the recovery window (header, views, bar state) | Full history: git log
+# Last modified: 2026-10-22 | Change: Reads monitor names and wallpapers for the map off the Tk thread | Full history: git log
 """Layout and bar state for keeper_app.RecoveryWindow. Display only: selection rules live in keeper_picker,
 restore and safety checks stay in keeper_app."""
 
+import gc
 import tkinter as tk
 from datetime import datetime
 
+from keeper_background import run_background
 from keeper_chrome import NOW, SAVED, ActionBar, Header
+from keeper_desktop_look import read_desktop_look
 from keeper_picker import SnapshotMap
 from keeper_scrubber import FilmStrip, reboot_marks, tick_positions
 from keeper_settings import record_auto_restore
@@ -42,6 +45,16 @@ class RecoveryScreen:
         self.map = SnapshotMap(self.recovery_tab, on_change=self.selection_changed, theme=self.theme,
                                on_restart=self.restart_one)
         self.map.pack(fill="both", expand=True)
+
+    # WHAT IT DOES: Reads this PC's monitor names and wallpapers off the Tk thread, then shows them on the map.
+    # DEPENDS ON: keeper_desktop_look (never raises; [] keeps the tinted desktops and "Monitor N").
+    # AFFECTS: Display only. Started by the app's real entry points, not by building the screen.
+    def read_desktop_look(self):
+        def show(look):
+            if self.map.winfo_exists():
+                self.map.set_look(look)
+        gc.collect()      # free old Tk objects here on the Tk thread, so the worker never has to
+        run_background(self.root, read_desktop_look, show, lambda error: None)
 
     # WHAT IT DOES: Shows Saved recovery or On screen now. Only Saved recovery can select or restart.
     # DEPENDS ON: The two view frames.

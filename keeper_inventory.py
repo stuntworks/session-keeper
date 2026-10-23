@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: One parent-id snapshot per scan for the Claude parent walk | Full history: git log
+# Last modified: 2026-10-22 | Change: Unidentified Claude rows carry launch command and folder for the restore proof | Full history: git log
 """Live process identity, separate from a window's screen location."""
 
 import json
@@ -24,6 +24,14 @@ def claude_record(process, directory=None):
     except (OSError, ValueError):
         pass
     return None
+
+
+# WHAT IT DOES: The process's working folder, or None when Windows will not say.
+def process_folder(process):
+    try:
+        return process.cwd()
+    except (psutil.AccessDenied, psutil.ZombieProcess, OSError):
+        return None
 
 
 # WHAT IT DOES: Collects live Claude and Codex CLI sessions, including unresolved processes.
@@ -53,6 +61,9 @@ def live_inventory(read_titles=True):
                 "cwd": record.get("cwd") if record else None,
                 "title": title, "method": method, "role": role,
                 "uncertain": not bool(record)})
+            if not record:
+                # Launch evidence for keeper_restore.provably_not_selected; never used to name a chat.
+                sessions[-1].update({"command": process.info.get("cmdline") or [], "processCwd": process_folder(process)})
         except psutil.NoSuchProcess:
             continue
         except psutil.AccessDenied as error:

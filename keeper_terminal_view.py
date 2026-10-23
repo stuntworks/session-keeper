@@ -1,10 +1,10 @@
-# Last modified: 2026-10-22 | Change: Exact map: one tab row, burgundy window outline, tinted screens, taskbars | Full history: git log
+# Last modified: 2026-10-22 | Change: Monitors drawn as real monitors: bezel, recessed desktop, chin, stand | Full history: git log
 """Canvas drawing for the recovery map: monitor bezels with tinted screens and taskbars, Windows Terminal
 windows and their tabs. Display only: the map (keeper_picker) owns state and clicks; this module only paints."""
 
-from keeper_theme import (AMBER, BEZEL, BLACK, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO, IC_ADD, IC_CHECK, IC_CLOSE,
-                          IC_DOWN, IC_MAX, IC_MIN, IC_TERMINAL, INK, OPEN_FILL, OUTLINE, STEEL, STRIP, TASKBAR,
-                          TERM, rounded)
+from keeper_theme import (AMBER, BEZEL, BEZEL_LIT, BLACK, CHIN, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO, IC_ADD,
+                          IC_CHECK, IC_CLOSE, IC_DOWN, IC_MAX, IC_MIN, IC_TERMINAL, INK, MONITOR_EDGE, OPEN_FILL, OUTLINE, POWER,
+                          RECESS, SHADOW, STEEL, STRIP, TASKBAR, TERM, WALL_CEIL, mix, rounded)
 
 STRIP_H, TAB_H, TAB_GAP = 50, 38, 6         # design pixels, as in the mockup
 MIN_NAME_CHARS = 6                            # a squeezed tab still shows 6 letters of its name
@@ -171,27 +171,80 @@ class Painter:
             return canvas.bbox(item)[2] + px(5)
         return cx
 
-    # WHAT IT DOES: Draws a monitor: bezel, its own tinted screen, the taskbar strip, chin label, neck and foot.
-    # DEPENDS ON: One screen entry from keeper_map_layout.exact_layout.
-    def draw_bezel(self, place, name, tint):
+    # WHAT IT DOES: Draws one monitor like the real thing: a shadow on the desk, a rounded bezel with a lit top
+    # edge, a recessed screen holding the desktop (the owner's dimmed wallpaper, a solid colour, or a tinted
+    # wallpaper-like gradient), the taskbar strip, a darker chin with the name and a power light, and a stand
+    # (neck and foot) centred under it.
+    # DEPENDS ON: One screen entry from keeper_map_layout.exact_layout; desktop = None, "#rrggbb" or PhotoImage.
+    # AFFECTS: Canvas items only (the frame is tagged "bezel", the foot "stand"); returns the lowest y drawn.
+    def draw_bezel(self, place, name, tint, desktop=None):
         canvas, px = self.canvas, self.px
         bezel, screen, bar = place["bezel"], place["screen"], place["bar"]
         x1, y1 = bezel["x"], bezel["y"]
         x2, y2 = x1 + bezel["w"], y1 + bezel["h"]
-        canvas.create_polygon(rounded(x1, y1, x2, y2, px(14)), smooth=True, fill=BEZEL, outline=EDGE, width=px(2))
-        canvas.create_rectangle(screen["x"], screen["y"], screen["x"] + screen["w"], screen["y"] + screen["h"],
-                                fill=tint, width=0)
+        radius = px(16)
+        canvas.create_polygon(rounded(x1 + px(4), y1 + px(10), x2 + px(4), y2 + px(10), radius), smooth=True,
+                              fill=SHADOW, outline="")
+        bottom = self.draw_stand(place.get("stand") or {"x": x1, "y": y2, "w": bezel["w"], "h": px(40)})
+        canvas.create_polygon(rounded(x1, y1, x2, y2, radius), smooth=True, fill=BEZEL, outline=MONITOR_EDGE,
+                              width=px(3), tags=("bezel",))
+        chin_top = bar["y"] + bar["h"] + px(6)
+        canvas.create_polygon(rounded(x1 + px(2), chin_top, x2 - px(2), y2 - px(2), radius - px(2)), smooth=True,
+                              fill=CHIN, outline="")
+        canvas.create_line(x1 + radius, y1 + px(2), x2 - radius, y1 + px(2), fill=BEZEL_LIT, width=px(2))
+        self.draw_desktop(screen, tint, desktop)
         canvas.create_rectangle(bar["x"], bar["y"], bar["x"] + bar["w"], bar["y"] + bar["h"], fill=TASKBAR,
                                 width=0)
-        middle, chin = (x1 + x2) / 2, (bar["y"] + bar["h"] + y2) / 2
-        text = canvas.create_text(middle + px(10), chin, text=name, font=self.theme.font("display", 21), fill=INK)
-        left = canvas.bbox(text)[0]
-        canvas.create_oval(left - px(20), chin - px(4), left - px(12), chin + px(4), fill=DIM, width=0)
-        canvas.create_rectangle(middle - px(40), y2, middle + px(40), y2 + px(14), fill=BEZEL, outline=EDGE,
-                                width=px(2))
-        canvas.create_polygon(rounded(middle - px(120), y2 + px(12), middle + px(120), y2 + px(24), px(6)),
-                              smooth=True, fill=BEZEL, outline=EDGE, width=px(2))
-        return y2 + px(24)
+        edge = px(3)
+        sx1, sy1 = screen["x"] - edge / 2, screen["y"] - edge / 2
+        sx2, sy2 = screen["x"] + screen["w"] + edge / 2, bar["y"] + bar["h"] + edge / 2
+        canvas.create_rectangle(sx1, sy1, sx2, sy2, outline=RECESS, width=edge)
+        canvas.create_line(sx1 - edge / 2, sy2 + edge, sx2 + edge / 2, sy2 + edge, fill=EDGE, width=max(px(1), 1))
+        middle, chin = (x1 + x2) / 2, (chin_top + y2) / 2
+        font = self.theme.font("display", 21)
+        canvas.create_text(middle, chin, text=fit_text(font, name, bezel["w"] - px(90)), font=font, fill=INK)
+        dot = px(4)
+        canvas.create_oval(x2 - px(30) - dot, chin - dot, x2 - px(30) + dot, chin + dot, fill=POWER, width=0)
+        return bottom
+
+    # WHAT IT DOES: The screen's desktop: a picture (the owner's wallpaper or keeper_desktop_look's tinted one),
+    # a solid colour, or, without Pillow, a gentle tinted gradient, so an empty screen reads as a desktop.
+    # DEPENDS ON: Every colour stays at or under WALL_CEIL, the brightness the contrast tests check.
+    def draw_desktop(self, screen, tint, desktop):
+        canvas = self.canvas
+        x, y, w, h = screen["x"], screen["y"], screen["w"], screen["h"]
+        if isinstance(desktop, str):
+            canvas.create_rectangle(x, y, x + w, y + h, fill=desktop, width=0)
+            return
+        if desktop is not None:
+            canvas.create_image(x, y, image=desktop, anchor="nw")
+            return
+        bands = 28
+        top, low = mix(tint, WALL_CEIL, 0.30), mix(tint, BLACK, 0.30)
+        for step in range(bands):
+            canvas.create_rectangle(x, y + h * step / bands, x + w, y + h * (step + 1) / bands + 1,
+                                    fill=mix(top, low, step / (bands - 1)), width=0)
+
+    # WHAT IT DOES: The monitor stand: a tapered neck out of the chin and a wide flat foot, both centred.
+    # DEPENDS ON: The stand area exact_layout reserved under the bezel (width = bezel width).
+    # AFFECTS: Canvas items only; returns the lowest y drawn.
+    def draw_stand(self, stand):
+        canvas, px = self.canvas, self.px
+        middle, top, height = stand["x"] + stand["w"] / 2, stand["y"], max(stand["h"], px(24))
+        neck_top = max(px(26), min(stand["w"] * 0.10, px(80))) / 2
+        neck_low = neck_top * 1.35
+        foot = max(px(110), min(stand["w"] * 0.40, px(460))) / 2
+        foot_top, bottom = top + height * 0.66, top + height
+        canvas.create_oval(middle - foot - px(10), bottom - px(6), middle + foot + px(10), bottom + px(8),
+                           fill=SHADOW, width=0)
+        canvas.create_polygon(middle - neck_top, top - px(2), middle + neck_top, top - px(2), middle + neck_low,
+                              foot_top + px(4), middle - neck_low, foot_top + px(4), fill=CHIN, outline=MONITOR_EDGE,
+                              width=px(2))
+        canvas.create_polygon(rounded(middle - foot, foot_top, middle + foot, bottom, px(8)), smooth=True,
+                              fill=BEZEL, outline=MONITOR_EDGE, width=px(2), tags=("stand",))
+        canvas.create_line(middle - foot + px(10), foot_top + px(2), middle + foot - px(10), foot_top + px(2),
+                           fill=BEZEL_LIT, width=max(px(1), 1))
+        return bottom + px(8)
 
     # WHAT IT DOES: Draws one Windows Terminal window at its exact box: one row of tabs, a black body with its
     # prompt line and footer chip when there is room, and a burgundy outline (dashed for a window whose

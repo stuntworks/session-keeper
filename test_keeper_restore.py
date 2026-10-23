@@ -1,4 +1,4 @@
-# Last modified: 2026-10-03 | Change: Test launch ordering without opening terminals | Full history: git log
+# Last modified: 2026-10-22 | Change: Restore tests take a throwaway lock, not the live recorder's | Full history: git log
 """Restore flow tests use fakes so user terminals are never touched."""
 
 import unittest
@@ -38,7 +38,8 @@ class RestoreTests(unittest.TestCase):
         with patch("keeper_restore.live_session_ids", return_value=set()), \
              patch("keeper_restore.read_windows", return_value=[]), \
              patch("keeper_restore.launch_tab") as launch:
-            restored, warnings = restore_selected(self.make_snapshot(), {"0:0", "0:1"}, True)
+            restored, warnings = restore_selected(self.make_snapshot(), {"0:0", "0:1"}, True,
+                                                 lock_name="unittest-restore")
         self.assertEqual(restored, ["First", "Second"])
         self.assertEqual(warnings, [])
         launch.assert_not_called()
@@ -54,7 +55,8 @@ class RestoreTests(unittest.TestCase):
              patch("keeper_restore.place_new_window") as place, \
              patch("keeper_restore.wait_for_session", return_value=True), \
              patch("keeper_restore.time.sleep"):
-            restored, warnings = restore_selected(self.make_snapshot(), {"0:0", "0:1"})
+            restored, warnings = restore_selected(self.make_snapshot(), {"0:0", "0:1"},
+                                                 lock_name="unittest-restore")
         self.assertEqual(restored, ["First", "Second"])
         self.assertEqual(warnings, [])
         self.assertEqual(launch.call_count, 2)

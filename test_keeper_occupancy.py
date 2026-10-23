@@ -1,8 +1,7 @@
-# Last modified: 2026-10-19 | Change: Tests for empty-terminal classification and asked-for closing | Full history: git log
+# Last modified: 2026-10-22 | Change: Occupancy tests take a throwaway restore lock | Full history: git log
 """Fakes only: no window is closed and no process is inspected for real."""
 
 import unittest
-from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -152,10 +151,13 @@ class CloseSpotTests(unittest.TestCase):
 class PlanChoiceTests(unittest.TestCase):
     covering = [{"hwnd": 9, **SPOT, "tabs": ["PowerShell"]}]
 
-    def test_no_choice_skips_and_reports_blocked(self):
+    # Owner 2026-10-22: an occupied spot no longer blocks; the window opens on top and says so.
+    def test_no_choice_opens_on_top_and_reports_blocked(self):
         blocked = []
         plans, warnings = plan_restore(saved(), {"0:0"}, set(), self.covering, blocked=blocked)
-        self.assertEqual(plans, [])
+        self.assertTrue(plans[0]["on_top"])
+        self.assertIn("PowerShell", plans[0]["covering"])
+        self.assertNotIn("close_hwnds", plans[0])
         self.assertEqual(blocked[0]["occupants"][0]["hwnd"], 9)
 
     def test_open_on_top_only_when_chosen(self):
@@ -177,8 +179,7 @@ class RestoreWithEmptyTerminalTests(unittest.TestCase):
 
         def close(hwnd):
             screen["now"] = []
-        with patch("keeper_restore.exclusive_operation", lambda name: nullcontext()), \
-             patch("keeper_restore.live_session_ids", return_value=set()), \
+        with patch("keeper_restore.live_session_ids", return_value=set()), \
              patch("keeper_restore.read_windows", side_effect=lambda: screen["now"]), \
              patch("keeper_restore.read_live_groups", return_value=groups), \
              patch("keeper_restore.read_monitors", return_value=[{"x": 0, "y": 0, "w": 3840, "h": 2088, "primary": True}]), \
@@ -193,14 +194,15 @@ class RestoreWithEmptyTerminalTests(unittest.TestCase):
              patch("keeper_restore.place_new_window"), \
              patch("keeper_restore.wait_for_session", return_value=True), \
              patch("keeper_restore.time.sleep"):
-            result = restore_selected(saved(), {"0:0", "0:1"}, dry_run, choices, approved)
+            result = restore_selected(saved(), {"0:0", "0:1"}, dry_run, choices, approved,
+                                      lock_name="unittest-restore")
         return result, closer, launch
 
-    def test_without_a_choice_nothing_is_closed(self):
+    def test_without_a_choice_nothing_is_closed_and_it_opens_on_top(self):
         (restored, warnings), closer, launch = self.run_restore()
         closer.assert_not_called()
-        launch.assert_not_called()
-        self.assertTrue(any("occupied" in w for w in warnings))
+        self.assertEqual(restored, ["First", "Second"])
+        self.assertTrue(any("on top of" in w and "PowerShell" in w and "drag it where you want" in w for w in warnings))
 
     def test_preview_describes_and_changes_nothing(self):
         (restored, warnings), closer, launch = self.run_restore(dry_run=True)

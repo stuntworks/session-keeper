@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: prune command and hourly snapshot thinning in the recorder | Full history: git log
+# Last modified: 2026-10-22 | Change: Recovery screen reads this PC's monitor names and wallpapers once it opens | Full history: git log
 """Session Keeper: record terminal groups and offer a safe recovery menu."""
 
 import argparse
@@ -11,13 +11,14 @@ from pathlib import Path
 
 from keeper_core import (DATA, capture_snapshot,
                          read_boot_id, read_windows, recovery_rows, save_snapshot)
-from keeper_restore import assess_restore, live_session_ids, restore_selected
+from keeper_restore import UnidentifiedSessions, assess_restore, live_session_ids, restore_selected
+from keeper_restore import open_second_copy as launch_second_copy
 from keeper_chooser import chooser_entries
 from keeper_scrubber import scrubber_stops
 from keeper_chrome import SAVED
 from keeper_recovery_view import RecoveryScreen
 from keeper_theme import GO, IC_CHECK, ROOM, STOP, Theme
-from keeper_ask import OccupiedDialog
+from keeper_ask import OccupiedDialog, all_empty
 from keeper_copycmd import build_resume_text
 from keeper_display import big_geometry, make_dpi_aware, pointer_monitor, read_monitors
 from keeper_settings import auto_restore_enabled
@@ -159,7 +160,8 @@ class RecoveryWindow(RecoveryScreen):
         if token.is_set() or self.native_wait is not token:
             return
         self.native_wait = None
-        self.countdown_text.configure(text=f"Automatic recovery paused: {error}")
+        self.countdown_text.configure(text=f"Automatic recovery paused: {error}. To fix: press Restart selected "
+                                          "to try again by hand.")
 
     # WHAT IT DOES: Chooser entry callback: maps an entry number to its saved snapshot.
     # DEPENDS ON: chooser_entries.
@@ -275,14 +277,26 @@ class RecoveryWindow(RecoveryScreen):
     # WHAT IT DOES: Drawer "Restart this tab": the same guarded restore, for that one missing tab only.
     # DEPENDS ON: The tab being an exactly matched, missing (not open) tab.
     # AFFECTS: Same as restart; other selected tabs are left alone.
+    # A running tab gets "Open a second copy" instead: launched only by that explicit click, never by restore.
     def restart_one(self, key):
-        if key in self.rows and self.map.tab_state(key) in ("missing", "selected"):
+        if key not in self.rows:
+            return
+        if self.map.tab_state(key) in ("missing", "selected"):
             self.begin_operation(dry_run=False, ask=True, keys={key})
+        elif self.map.tab_state(key) == "live" and not self.busy:
+            row = {**self.rows[key], "key": key}
+            run_background(self.root, lambda: launch_second_copy(row),
+                           lambda result: self.map.drawer.show_message(
+                               "Second copy opened", [f"Opened a second copy of '{row['title']}' in a new window."],
+                               ["Two copies of the same chat can overwrite each other's history. Close one when done."]),
+                           lambda error: self.operation_failed(error))
 
     # WHAT IT DOES: Starts a single preview or restore while keeping the UI responsive.
     # DEPENDS ON: Selected keys, background worker, and restore safety checks.
     # AFFECTS: Repeated clicks cannot queue multiple recovery operations. ask=False (countdown) never asks or closes.
-    def begin_operation(self, dry_run, ask=False, keys=None):
+    # override=True only from the explicit "Restore anyway" click. ask=False and not dry_run is the login
+    # auto-restore, which stays fully strict about unidentified sessions.
+    def begin_operation(self, dry_run, ask=False, keys=None, override=False):
         self.cancel_countdown()
         if self.busy:
             return
@@ -292,44 +306,51 @@ class RecoveryWindow(RecoveryScreen):
             return
         self.busy = True
         self.countdown_text.configure(text="Checking saved sessions and screen positions…")
+        manual = bool(ask or dry_run)
         if dry_run or not ask:
-            self.run_restore(selected, dry_run)
+            self.run_restore(selected, dry_run, manual=manual, override=override)
             return
-        run_background(self.root, lambda: assess_restore(self.snapshot, selected),
-                       lambda blocked: self.ask_about(selected, blocked), self.operation_failed)
+        run_background(self.root, lambda: assess_restore(self.snapshot, selected, override),
+                       lambda blocked: self.ask_about(selected, blocked, override),
+                       lambda error: self.operation_failed(error, selected))
 
     # WHAT IT DOES: Shows the confirm dialog when saved spots are covered, otherwise restores straight away.
     # DEPENDS ON: Classified blocked spots from assess_restore.
     # AFFECTS: Cancel restores nothing.
-    def ask_about(self, selected, blocked):
-        if not blocked:
-            self.run_restore(selected, False)
+    # Owner 2026-10-22: in-use windows never ask; the restored window opens on top of them. Only empty
+    # leftover terminals get the question, because only they can be closed.
+    def ask_about(self, selected, blocked, override=False):
+        empty = [spot for spot in blocked if all_empty(spot)]
+        if not empty:
+            self.run_restore(selected, False, override=override)
             return
-        self.countdown_text.configure(text="Waiting for your answer about covered spots…")
-        OccupiedDialog(self.root, blocked, lambda result: self.answered(selected, result))
+        self.countdown_text.configure(text="Waiting for your answer about empty terminals…")
+        OccupiedDialog(self.root, empty, lambda result: self.answered(selected, result, override))
 
     # WHAT IT DOES: Continues or cancels after the confirm dialog.
     # DEPENDS ON: (choices, approved HWNDs) or None.
     # AFFECTS: Starts the guarded restore with exactly the user's choices.
-    def answered(self, selected, result):
+    def answered(self, selected, result, override=False):
         if result is None:
             self.busy = False
             self.countdown_text.configure(text="Cancelled. Nothing was opened or closed.")
             return
         choices, approved = result
-        self.run_restore(selected, False, choices, approved)
+        self.run_restore(selected, False, choices, approved, override=override)
 
     # WHAT IT DOES: Runs the guarded restore or preview in the background.
     # DEPENDS ON: restore_selected.
     # AFFECTS: See restore_selected.
-    def run_restore(self, selected, dry_run, choices=None, approved=()):
-        run_background(self.root, lambda: restore_selected(self.snapshot, selected, dry_run, choices, approved),
-                       lambda result: self.finish_operation(result, dry_run), self.operation_failed)
+    def run_restore(self, selected, dry_run, choices=None, approved=(), manual=True, override=False):
+        run_background(self.root, lambda: restore_selected(self.snapshot, selected, dry_run, choices, approved,
+                                                           manual, override),
+                       lambda result: self.finish_operation(result, dry_run, selected),
+                       lambda error: self.operation_failed(error, selected))
 
     # WHAT IT DOES: Reports verified resumes or preview results after background work finishes.
     # DEPENDS ON: Restore result with successful titles and skip reasons.
     # AFFECTS: Unlocks the screen and refreshes which tabs are live.
-    def finish_operation(self, result, dry_run):
+    def finish_operation(self, result, dry_run, selected=()):
         self.busy = False
         self.live_panel.refresh()
         restored, warnings = result
@@ -338,7 +359,10 @@ class RecoveryWindow(RecoveryScreen):
             lines = [item if item.startswith("Would ") else f"Would open: {item}" for item in restored]
             self.map.drawer.show_message("Preview", lines or ["Would open: nothing"], warnings)
         else:
-            self.map.drawer.show_message("Restarted", ["Verified running:"] + (restored or ["Nothing"]), warnings)
+            opened = set(restored)
+            unopened = [key for key in selected if key in self.rows and self.rows[key]["title"] not in opened]
+            self.map.drawer.show_message("Restarted", ["Verified running:"] + (restored or ["Nothing"]), warnings,
+                                         commands=self.command_entries(unopened) if warnings else ())
             self.refresh_live()
         self.selection_changed()
 
@@ -360,11 +384,34 @@ class RecoveryWindow(RecoveryScreen):
     # WHAT IT DOES: Displays a failed background check without closing Session Keeper.
     # DEPENDS ON: An exception from the background worker.
     # AFFECTS: The user can correct the problem and retry.
-    def operation_failed(self, error):
+    # An unidentified CLI gets the explicit "Restore anyway" button; nothing proceeds without that click.
+    def operation_failed(self, error, selected=()):
         self.busy = False
-        self.countdown_text.configure(text="Recovery paused.")
-        self.map.drawer.show_message("Recovery paused", [], [str(error)])
+        text = str(error)
+        action = None
+        if isinstance(error, UnidentifiedSessions) and selected:
+            keys = set(selected)
+            action = ("Restore anyway",
+                      lambda: self.begin_operation(dry_run=False, ask=True, keys=keys, override=True))
+        elif "To fix" not in text:
+            text = f"{text}. To fix: press Restart selected again in a moment."
+        self.countdown_text.configure(text="Recovery paused. See the panel on the right for how to fix it.")
+        self.map.drawer.show_message("Recovery paused", [], [text], action=action,
+                                     commands=self.command_entries(selected) if selected else ())
         self.selection_changed()
+
+    # WHAT IT DOES: The exact resume command for each given tab, for the report panel's Copy / Open buttons.
+    # DEPENDS ON: keeper_tabdetails.tab_details (same text as the details drawer and Copy command).
+    # AFFECTS: Returns data only.
+    def command_entries(self, keys):
+        from keeper_tabdetails import tab_details
+        entries = []
+        for key in sorted(keys, key=lambda key: tuple(int(part) for part in key.split(":"))):
+            info = tab_details(self.snapshot, key, self.rows, self.live)
+            if info["command"]:
+                entries.append({"key": key, "title": info["name"], "text": info["command"],
+                                "can_open": info["can_open"]})
+        return entries
 
 
 # WHAT IT DOES: Size and place the recovery window close to full screen on the monitor under the pointer.
@@ -474,7 +521,7 @@ def main():
                 recovery = startup_recovery(read_boot_id())
                 if recovery:
                     root.deiconify()
-                    RecoveryWindow(root, *recovery, watch_mode=True)
+                    RecoveryWindow(root, *recovery, watch_mode=True).read_desktop_look()
             root.after(1000, lambda: watch(root))
             root.mainloop()
         return
@@ -491,7 +538,7 @@ def main():
 def open_recovery(root, history, live=None):
     if history:
         root.deiconify()
-        RecoveryWindow(root, *history[0], history=history, live=live)
+        RecoveryWindow(root, *history[0], history=history, live=live).read_desktop_look()
         publish_window(root)
     else:
         print("No Session Keeper snapshot exists yet.")

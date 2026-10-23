@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: One PowerShell-safe line per tab, refuses missing folders | Full history: git log
+# Last modified: 2026-10-22 | Change: Two plain lines per tab, folder then resume; still refuses a missing folder | Full history: git log
 """Pure text builder: turns selected recovery rows into commands the user can paste into a terminal."""
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from keeper_core import SESSION_ID
 from keeper_restore import resume_program
 
 
-# WHAT IT DOES: Builds one paste-ready block per row: one PowerShell line that moves to the saved folder and resumes only if that worked.
+# WHAT IT DOES: Builds one paste-ready block per row: two plain lines, the saved folder and then the resume command.
 # DEPENDS ON: recovery_rows-style dicts (session_id, kind, title, cwd) and keeper_restore.resume_program.
 # AFFECTS: Returns text only. Refuses any row without an exact session ID, a folder with a line break, or a folder missing on this PC.
 def build_resume_text(rows):
@@ -25,7 +25,7 @@ def build_resume_text(rows):
         if not Path(cwd).is_dir():
             raise ValueError(f"Saved project folder no longer exists: {cwd}")
         literal = "'" + cwd.replace("'", "''") + "'"
-        lines = [f"if (Set-Location -LiteralPath {literal} -PassThru) {{ {' '.join(resume_program(row))} }}"]
+        lines = [f"cd -LiteralPath {literal}", " ".join(resume_program(row))]
         if len(rows) > 1:
             title = " ".join((row.get("title") or "Recovered session").split())
             lines.insert(0, f"# {title}")

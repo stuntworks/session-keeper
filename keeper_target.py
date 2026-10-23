@@ -1,4 +1,4 @@
-# Last modified: 2026-10-19 | Change: Add a tab into an exact already-open terminal window and verify it landed | Full history: git log
+# Last modified: 2026-10-22 | Change: Add-tab stop messages say how to fix | Full history: git log
 """Targets one existing Windows Terminal window from outside, then proves the tab landed there.
 
 HOW A WINDOW IS TARGETED
@@ -75,13 +75,16 @@ def landed_in(before, after, hwnd):
 def add_tab(hwnd, row, window_name, launch, wait_for_session, read_windows):
     before = read_windows()
     if hwnd not in tab_counts(before):
-        raise RuntimeError("its window closed before the tab could be added")
+        raise RuntimeError("its window closed before the tab could be added. To fix: press Restart selected "
+                           "again; it will open in a new window")
     if not window_name and not bring_to_front(hwnd):
-        raise RuntimeError("could not bring its window to the front, so nothing was opened")
+        raise RuntimeError("could not bring its window to the front, so nothing was opened. To fix: click "
+                           "that window once (un-minimise it), then press Restart selected again")
     launch(window_name or "0", row)
     verified = wait_for_session(row["session_id"])
     after = read_windows()
     if not landed_in(before, after, hwnd):
         raise TargetMissed(f"{row['title']} opened, but not in its own window. Stopped adding tabs to open "
-                           "windows; nothing was closed. Check your terminals.")
+                           "windows; nothing was closed. To fix: find that new tab, drag it into its own window if you "
+                           "like, then press Restart selected again for the rest.")
     return verified

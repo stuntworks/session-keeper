@@ -23,14 +23,13 @@ If you run many AI coding sessions at once, a crash or reboot loses all of them:
    powershell -ExecutionPolicy Bypass -File install_startup.ps1 -Apply   # creates the shortcuts
    ```
 
-   `-Apply` creates three shortcuts. It refuses to overwrite any that already exist.
+   `-Apply` creates two shortcuts. It refuses to overwrite any that already exist.
 
    | Shortcut | Where | What it does |
    |---|---|---|
    | Session Keeper | Your **Startup** folder | Runs the background recorder at every login |
    | Session Keeper | Your **Desktop** | Opens the recovery screen |
-   | Session Keeper | Your **Start menu** | Opens the recovery screen |
-
+   
 3. Turn off Windows Terminal's own restore. It competes with Session Keeper and can open duplicate windows:
 
    ```powershell
@@ -57,18 +56,21 @@ You do nothing. The recorder runs silently and saves a snapshot about every two 
 3. Tab colours: grey = already open (nothing opens twice), white with a red dot = missing, green = selected, **?** = could not be identified and is never restored. Hover a tab for its full name.
 4. Click the missing tabs you want. Click a window's title bar to select all its missing tabs, or press **Select all** (formerly "Check all available") for every window.
 5. Press **Preview** to see exactly what would happen, or **Restart selected** (formerly "Restart checked") to do it.
-6. A missing tab whose window is still open is added back into that same window. Otherwise each conversation reopens grouped into its original window at its original spot.
-7. **Copy command** (green when tabs are selected) copies one PowerShell line per tab. It moves to the saved folder and resumes the chat (`claude -r <session id>` or `codex resume <id>`) only if that folder exists. Paste them into PowerShell if the automatic restore fails.
-8. **Saved layout** picks an earlier moment: Latest, Before last reboot, 15 min ago, 1 hour ago, earlier today, or previous days.
+6. A missing tab whose window is still open is added back into that same window. Otherwise each conversation reopens grouped into its original window at its original spot. If another window is sitting on that spot, it opens on top of it and the report says so ("opened on top of ...; drag it where you want"). Nothing is closed.
+7. Click any tab on the map to see its exact resume command at the top of the details panel, with **Copy command** and **Open it for me**. The command is two plain lines: the first goes to the saved folder, and the second resumes that chat. For a chat that is already running the button is **Open a second copy**, with a warning that two copies of one chat can overwrite each other's history.
+8. If recovery stops or skips a tab, the panel on the right says which tab (and which window and monitor), what to do about it, and shows that tab's command with **Copy command** and **Open it for me**. If an open Claude or Codex tab cannot be identified, it names that tab and offers **Restore anyway**; nothing goes ahead past it until you click that.
+9. **Copy command** (green when tabs are selected) copies two plain lines per tab. The first line goes to the saved folder. The second line resumes the chat (`claude -r <session id>` or `codex resume <id>`). Nothing is copied when that folder is no longer there. Paste the lines into PowerShell if the automatic restore fails.
+10. **Saved layout** picks an earlier moment: Latest, Before last reboot, 15 min ago, 1 hour ago, earlier today, or previous days.
 
 **Optional: automatic recovery.** On the recovery screen, tick **Restore saved chats at next Windows login**. After the next reboot, the recovery screen opens by itself at login and restores everything after a ten-second countdown. Press **Skip / STOP** to cancel. It is off by default and only triggers after a real reboot, never when the recorder simply restarts.
 
 ## Safety rules it follows
 
-- Never opens a conversation that is already running.
-- Never stacks a window on top of an occupied spot unless you click **Open on top anyway** (or **Restore beside them**) for that spot.
+- Never opens a conversation that is already running. The only way to get a second copy is the explicit **Open a second copy** button on that one tab.
+- Never stops because a spot is covered: the restored window opens on top of whatever is there, and the report names it so you can drag it.
 - Never guesses. A tab it cannot tie to one exact conversation is shown but not restored.
-- Never closes a window on its own. If empty leftover terminals (bare prompts, no program running) sit on a saved spot, it asks once: **Close empty and restore**, **Restore beside them**, or **Cancel** (the default). A terminal with a running chat, or one it cannot check, is never offered for closing. The automatic login restore never closes anything.
+- If an open Claude or Codex tab cannot be identified, recovery stops so it cannot open a chat twice. A clicked restore still goes ahead when that tab's own launch command proves it is a different chat (a plain `claude`, `claude -r <other id>`, or `claude --continue` in another folder). Otherwise it names the tab and waits for you: type a message in it or close it and press **Restart selected** again, or click **Restore anyway**. The automatic login restore never goes past an unidentified tab on its own.
+- Never closes a window on its own. If empty leftover terminals (bare prompts, no program running) sit on a saved spot, it asks once: **Close empty ones and restart**, **Restart on top of them**, or **Cancel** (the default). A terminal with a running chat, or one it cannot check, is never offered for closing. The automatic login restore never closes anything.
 
 ## Commands
 

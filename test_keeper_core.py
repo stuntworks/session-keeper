@@ -53,11 +53,12 @@ class KeeperCoreTests(unittest.TestCase):
     # WHAT IT DOES: Skips a saved position when a terminal already covers it.
     # DEPENDS ON: Current window geometry.
     # AFFECTS: Prevents a newly opened window hiding one already on screen.
-    def test_occupied_position_is_skipped(self):
+    def test_occupied_position_opens_on_top(self):
+        # Owner 2026-10-22: a covered spot opens on top in a NEW window; never into the other window.
         plans, warnings = plan_restore(self.make_snapshot(), {"0:0"}, set(),
             [{"x": 200, "y": 200, "w": 800, "h": 600}])
-        self.assertEqual(plans, [])
-        self.assertIn("occupied", warnings[0])
+        self.assertTrue(plans[0]["on_top"])
+        self.assertNotIn("window_name", plans[0])
 
 
 if __name__ == "__main__":

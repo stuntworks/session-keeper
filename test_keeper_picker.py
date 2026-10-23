@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Minimised and hidden windows are taskbar buttons | Full history: git log
+# Last modified: 2026-10-22 | Change: Copy command expectation is two plain lines | Full history: git log
 """Hidden Tk roots and fakes only: nothing is launched, focused or closed."""
 
 import os
@@ -15,6 +15,7 @@ from keeper_ask import BESIDE, CLOSE, OccupiedDialog, plan_choices
 from keeper_chooser import chooser_entries
 from keeper_core import plan_restore
 from keeper_map_layout import nudge_apart, shares_column, split_windows
+from tk_test_support import free_tk_garbage, keep_drawer_on_main_thread, no_workers_left
 
 IDS = [str(n) * 8 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 4 + "-" + str(n) * 12 for n in range(1, 8)]
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
@@ -24,6 +25,7 @@ REAL = tempfile.mkdtemp(prefix="keeper_pk_")
 
 def tearDownModule():
     shutil.rmtree(REAL, ignore_errors=True)
+    free_tk_garbage()
 
 
 # WHAT IT DOES: Builds a two-monitor layout: window 1 fully open, window 2 with a missing "green" tab,
@@ -136,7 +138,9 @@ class PickerWindowTests(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()
         self.root.withdraw()
+        self.addCleanup(no_workers_left, self)
         self.addCleanup(self.root.destroy)
+        keep_drawer_on_main_thread(self)
         self.history = [(Path("new.json"), layout()), (Path("old.json"), layout("2026-10-18T09:00:00+00:00", "boot-1"))]
         for target, value in [("fast_history", self.history), ("live_session_ids", LIVE),
                               ("auto_restore_enabled", False), ("terminal_restore_enabled", False),
@@ -150,6 +154,8 @@ class PickerWindowTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.restore = patch.object(keeper_app, "restore_selected", return_value=([], [])).start()
         self.assess = patch.object(keeper_app, "assess_restore", return_value=[]).start()
+        # Never open a real terminal from a test ("Open a second copy" launches directly).
+        self.second = patch.object(keeper_app, "launch_second_copy").start()
         self.addCleanup(patch.stopall)
         sync = patch.object(keeper_app, "run_background", side_effect=lambda root, action, ok, err: ok(action()))
         sync.start()
@@ -360,16 +366,39 @@ class PickerWindowTests(unittest.TestCase):
         self.assertEqual(self.restore.call_args.args[1], {"1:1"})
         self.assertEqual(view.selected(), {"2:0"})
 
-    def test_drawer_restart_button_disabled_for_open_and_unknown_tabs(self):
+    def test_drawer_open_button_per_tab_state(self):
         view = self.view
         view.map.select_tab("0:0")
-        self.assertEqual(view.map.drawer.restart_btn["state"], "disabled")
+        self.assertEqual(view.map.drawer.restart_btn["state"], "normal")
+        self.assertEqual(view.map.drawer.restart_btn.cget("text"), "Open a second copy")
         view.map.select_tab("1:2")
         self.assertEqual(view.map.drawer.restart_btn["state"], "disabled")
         view.map.select_tab("1:1")
         self.assertEqual(view.map.drawer.restart_btn["state"], "normal")
 
-    def test_drawer_hidden_until_a_tab_is_clicked(self):
+    # WHAT IT DOES: "Open a second copy" on a running tab launches only on that explicit click, never via restore.
+    def test_second_copy_only_on_explicit_click(self):
+        view = self.view
+        with patch.object(keeper_app, "launch_second_copy") as launch:
+            view.map.select_tab("0:0")
+            view.map.drawer.restart_one()
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[0]["key"], "0:0")
+        self.restore.assert_not_called()
+
+    # WHAT IT DOES: A stopped restore lists the exact command for each tab that did not open, with Copy and Open.
+    def test_stopped_restore_shows_commands_for_unopened_tabs(self):
+        view = self.view
+        view.map.toggle("1:1")
+        self.restore.return_value = ([], ["Not opened: 'green': something. To fix: try again."])
+        with patch.object(view.map.drawer, "show_message") as shown:
+            view.restart()
+        commands = shown.call_args.kwargs["commands"]
+        self.assertEqual([entry["key"] for entry in commands], ["1:1"])
+        self.assertIn("claude -r ", commands[0]["text"])
+        self.assertTrue(commands[0]["can_open"])
+
+
         view = self.view
         self.assertEqual(view.map.drawer.winfo_manager(), "", "empty drawer must not take map width")
         view.map.select_tab("0:0")
@@ -402,7 +431,7 @@ class PickerWindowTests(unittest.TestCase):
             self.view.restart()
             dialog.call_args.args[2](({1: "close_empty"}, {9}))
         self.restore.assert_called_once()
-        self.assertEqual(self.restore.call_args.args[3:], ({1: "close_empty"}, {9}))
+        self.assertEqual(self.restore.call_args.args[3:5], ({1: "close_empty"}, {9}))
 
     def test_countdown_never_asks_and_never_closes(self):
         self.view.map.toggle("1:1")
@@ -423,7 +452,7 @@ class PickerWindowTests(unittest.TestCase):
         view.map.toggle("1:1")
         view.copy_command()
         self.assertEqual(self.root.clipboard_get(),
-                         "if (Set-Location -LiteralPath '" + REAL + "' -PassThru) { claude -r " + IDS[3] + " }")
+                         "cd -LiteralPath '" + REAL + "'" + chr(10) + "claude -r " + IDS[3])
         self.assertIn("Copied command for green", view.copy_status.cget("text"))
         self.assertEqual(view.copy_button.cget("text"), "Copied")
         view.check_all()

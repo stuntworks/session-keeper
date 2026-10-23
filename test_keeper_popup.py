@@ -1,4 +1,4 @@
-# Last modified: 2026-10-03 | Change: Keep disabled startup and mid-session recording silent | Full history: git log
+# Last modified: 2026-10-22 | Change: Free Tk objects on the main thread at module end | Full history: git log
 """The watcher must stay silent while the user works; closing a tab is not a crash."""
 
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import keeper_app
+from tk_test_support import free_tk_garbage
 
 FIRST_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 SECOND_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -77,6 +78,12 @@ class StartupSilenceTests(unittest.TestCase):
             keeper_app.main()
         self.assertFalse(screen.called, "login raised a recovery screen nobody asked for")
         self.assertEqual(root.state(), "withdrawn")
+
+# WHAT IT DOES: Frees this module's Tk objects on the main thread before other tests start threads.
+# DEPENDS ON: tk_test_support.free_tk_garbage.
+# AFFECTS: Prevents the random Tcl_AsyncDelete abort in later tests.
+def tearDownModule():
+    free_tk_garbage()
 
 
 if __name__ == "__main__":

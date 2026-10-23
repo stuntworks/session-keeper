@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Full restore opens back windows first | Full history: git log
+# Last modified: 2026-10-22 | Change: Full restore test takes a throwaway lock, not the live recorder's | Full history: git log
 """Mocks only: no real terminal launches or Windows settings writes."""
 import unittest
 from unittest.mock import patch,MagicMock
@@ -6,6 +6,7 @@ from contextlib import nullcontext,ExitStack
 from pathlib import Path
 import keeper_app
 from keeper_core import plan_restore
+from tk_test_support import free_tk_garbage,no_workers_left
 
 # WHAT IT DOES: Builds two saved windows with the same overlap seen during recovery.
 # ISOLATED
@@ -67,10 +68,12 @@ class StartupIntegrationTests(unittest.TestCase):
     # WHAT IT DOES: Still rejects an overlapping window without matching ownership evidence.
     # DEPENDS ON: A foreign tab or an old snapshot's receipt.
     # AFFECTS: Other user work remains untouched.
-    def test_foreign_overlap_blocked(self):
+    # Owner 2026-10-22: a foreign overlap opens a new window on top, never refills the foreign one.
+    def test_foreign_overlap_opens_new_window_on_top(self):
         for title,group in [('Unrelated','saved#0'),('First','old#0')]:
             plans,_=plan_restore(layout(),{'1:0'},set(),[{'hwnd':7,'x':0,'y':0,'w':1000,'h':700,'tabs':[title]}],owned_windows=[{'hwnd':7,'group':group,'window_name':'SessionKeeper-first'}])
-            self.assertEqual(plans,[])
+            self.assertTrue(plans[0]['on_top'])
+            self.assertNotIn('window_name',plans[0])
 
     # WHAT IT DOES: Refills a target group despite its known recovered neighbor overlapping.
     # DEPENDS ON: Two verified receipts from the same layout.
@@ -88,9 +91,9 @@ class StartupIntegrationTests(unittest.TestCase):
     def test_countdown_and_stop_controls(self):
         import tkinter as tk
         for competing in (False,True):
-            root=tk.Tk();root.withdraw()
+            root=tk.Tk();root.withdraw();jobs=[]
             try:
-                with patch.object(keeper_app,'fast_history',return_value=[]), patch.object(keeper_app,'live_session_ids',return_value=set()), patch.object(keeper_app,'auto_restore_enabled',return_value=True), patch.object(keeper_app,'terminal_restore_enabled',return_value=competing), patch.object(keeper_app,'LiveChatsPanel'), patch.object(keeper_app,'restore_selected') as restore:
+                with patch.object(keeper_app,'fast_history',return_value=[]), patch.object(keeper_app,'live_session_ids',return_value=set()), patch.object(keeper_app,'auto_restore_enabled',return_value=True), patch.object(keeper_app,'terminal_restore_enabled',return_value=competing), patch.object(keeper_app,'LiveChatsPanel'), patch.object(keeper_app,'restore_selected') as restore, patch.object(keeper_app,'run_background',side_effect=lambda root,action,ok,err:jobs.append(action)):
                     view=keeper_app.RecoveryWindow(root,Path('saved.json'),layout(),watch_mode=True)
                     if competing:
                         self.assertIsNone(view.countdown_job)
@@ -103,9 +106,13 @@ class StartupIntegrationTests(unittest.TestCase):
                     view.skip()
                     if competing:
                         self.assertTrue(wait_token.is_set())
+                        # The queued Terminal wait now ends at once, without reading the real screen.
+                        self.assertEqual(len(jobs),1)
+                        self.assertIsNone(jobs[0]())
                     self.assertIsNone(view.countdown_job)
                     self.assertEqual(root.state(),'withdrawn')
                     restore.assert_not_called()
+                    no_workers_left(self)
             finally:root.destroy()
 
     # WHAT IT DOES: Runs a complete two-window restore with overlapping saved positions.
@@ -118,11 +125,17 @@ class StartupIntegrationTests(unittest.TestCase):
             current.append({'hwnd':len(current)+1,'tabs':[row['title']],**{key:row['window'][key] for key in ('x','y','w','h')}})
             live.add(row['session_id'])
         with patch('keeper_restore.live_session_ids',side_effect=lambda **kw:set(live)), patch('keeper_restore.read_windows',side_effect=lambda:list(current)), patch('keeper_restore.load_created_windows',return_value=[]), patch('keeper_restore.read_boot_id',return_value='boot'), patch('keeper_restore.read_monitors',return_value=[{'x':0,'y':0,'w':4000,'h':2000}]), patch('keeper_restore.launch_tab',side_effect=launch), patch('keeper_restore.find_new_window',side_effect=lambda *args:current[-1]), patch('keeper_restore.record_created_window'), patch('keeper_restore.place_new_window'), patch('keeper_restore.wait_for_session',return_value=True):
-            restored,warnings=restore_selected(layout(),{'0:0','1:0'})
+            restored,warnings=restore_selected(layout(),{'0:0','1:0'}, lock_name="unittest-restore")
         # Same two tabs; the order is back window first (keeper_zorder.back_to_front). This snapshot has no
         # "z", so list order counts as front-to-back and the last window ('Second') opens first.
         self.assertEqual(sorted(restored),['First','Second'])
         self.assertEqual(restored,['Second','First'])
         self.assertEqual(warnings,[])
+
+# WHAT IT DOES: Frees this module's Tk objects on the main thread before other tests start threads.
+# DEPENDS ON: tk_test_support.free_tk_garbage.
+# AFFECTS: Prevents the random Tcl_AsyncDelete abort in later tests.
+def tearDownModule():
+    free_tk_garbage()
 
 if __name__=='__main__':unittest.main()

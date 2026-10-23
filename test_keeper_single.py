@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Tests for one recovery screen at a time | Full history: git log
+# Last modified: 2026-10-22 | Change: Free Tk objects on the main thread at module end | Full history: git log
 """Fake window records and a throwaway mutex name only. Nothing is focused, launched or closed."""
 
 import json
@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import keeper_single
 from keeper_single import choose_target, claim_recover_screen, pid_alive, try_own
+from tk_test_support import free_tk_garbage
 
 HERE = Path(__file__).resolve().parent
 
@@ -125,6 +126,12 @@ class AppHookTests(unittest.TestCase):
         with patch.object(keeper_app.sys, "argv", ["keeper_app.py", "watch"]),                 patch.object(keeper_app, "claim_recover_screen") as claim,                 patch.object(keeper_app.tk, "Tk"), patch.object(keeper_app, "make_dpi_aware"),                 patch.object(keeper_app, "auto_restore_enabled", return_value=False),                 patch.object(keeper_app, "exclusive_operation"):
             keeper_app.main()
         claim.assert_not_called()
+
+# WHAT IT DOES: Frees this module's Tk objects on the main thread before other tests start threads.
+# DEPENDS ON: tk_test_support.free_tk_garbage.
+# AFFECTS: Prevents the random Tcl_AsyncDelete abort in later tests.
+def tearDownModule():
+    free_tk_garbage()
 
 
 if __name__ == "__main__":

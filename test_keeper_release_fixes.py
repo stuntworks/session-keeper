@@ -35,11 +35,14 @@ class NeverGuessTheFolder(unittest.TestCase):
     def test_tab_with_folder_still_a_row(self):
         self.assertEqual(recovery_rows(snapshot("C:/x"))[0]["cwd"], "C:/x")
 
-    def test_tab_details_for_folderless_tab_cannot_copy(self):
+    # Owner 2026-10-22: no folder is guessed, but the bare resume command is still shown and copyable.
+    def test_tab_details_for_folderless_tab_shows_bare_command(self):
         snap = snapshot(None)
         info = tab_details(snap, "0:0", {row["key"]: row for row in recovery_rows(snap)}, set())
-        self.assertFalse(info["can_copy"])
-        self.assertEqual(info["command"], "")
+        self.assertTrue(info["can_copy"])
+        self.assertFalse(info["can_open"])
+        self.assertNotIn("Set-Location", info["command"])
+        self.assertIn(ID, info["command"])
         self.assertIn("folder", info["note"].lower())
 
     def test_copy_command_refuses_missing_folder(self):

@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: exact_layout draws every window at its real spot under one scale | Full history: git log
+# Last modified: 2026-10-22 | Change: exact_layout reserves a stand under each monitor and centres the desk | Full history: git log
 """Pure geometry for the recovery map. Display positions only; restores always use the real saved positions."""
 
 from keeper_home import is_minimised
@@ -80,11 +80,12 @@ def nudge_apart(boxes, gap=GAP):
 
 
 # WHAT IT DOES: Draws the desk exactly: every monitor and every window at its real x/y/w/h under ONE scale
-# (no widening, no pushing apart, no scrolling), with each monitor's taskbar strip under its screen.
+# (no widening, no pushing apart, no scrolling), with each monitor's taskbar strip under its screen and room
+# for its stand below the bezel. The whole desk is centred in the area.
 # DEPENDS ON: Saved monitors (falls back to one screen around the windows) and drawable window indexes.
-# AFFECTS: Returns (screens, boxes, home, scale): screens = [{"bezel", "screen", "bar", "number"}] in saved
-# monitor order; boxes by window index, cut at their screen's edge; home = window index -> screen number.
-def exact_layout(monitors, windows, placed, area_w, area_h, gap=36, side=16, top=16, bar=60, chin=40):
+# AFFECTS: Returns (screens, boxes, home, scale): screens = [{"bezel", "screen", "bar", "stand", "number"}] in
+# saved monitor order; boxes by window index, cut at their screen's edge; home = window index -> screen number.
+def exact_layout(monitors, windows, placed, area_w, area_h, gap=36, side=16, top=16, bar=60, chin=40, stand=0):
     bounds = list(monitors or [])
     if not bounds:
         shown = [windows[index] for index in placed]
@@ -101,17 +102,19 @@ def exact_layout(monitors, windows, placed, area_w, area_h, gap=36, side=16, top
     row = [sum(1 for o in bounds if o["y"] + o["h"] <= m["y"]) for m in bounds]
     columns, rows = max(column) + 1, max(row) + 1
     extra_w = columns * 2 * side + (columns - 1) * gap
-    extra_h = rows * (top + bar + chin) + (rows - 1) * gap
+    extra_h = rows * (top + bar + chin + stand) + (rows - 1) * gap
     scale = max(min((area_w - extra_w) / max(desk_w, 1), (area_h - extra_h) / max(desk_h, 1)), 0.01)
     offset = max((area_w - desk_w * scale - extra_w) / 2, 0)
+    lift = max((area_h - desk_h * scale - extra_h) / 2, 0)
     screens = []
     for number, monitor in enumerate(bounds):
         sx = offset + side + column[number] * (2 * side + gap) + (monitor["x"] - left) * scale
-        sy = top + row[number] * (top + bar + chin + gap) + (monitor["y"] - upper) * scale
+        sy = lift + top + row[number] * (top + bar + chin + stand + gap) + (monitor["y"] - upper) * scale
         sw, sh = monitor["w"] * scale, monitor["h"] * scale
+        bezel = {"x": sx - side, "y": sy - top, "w": sw + 2 * side, "h": sh + top + bar + chin}
         screens.append({"number": number, "screen": {"x": sx, "y": sy, "w": sw, "h": sh},
-                        "bar": {"x": sx, "y": sy + sh, "w": sw, "h": bar},
-                        "bezel": {"x": sx - side, "y": sy - top, "w": sw + 2 * side, "h": sh + top + bar + chin}})
+                        "bar": {"x": sx, "y": sy + sh, "w": sw, "h": bar}, "bezel": bezel,
+                        "stand": {"x": bezel["x"], "y": bezel["y"] + bezel["h"], "w": bezel["w"], "h": stand}})
     boxes, home = {}, {}
     for index in placed:
         window = windows[index]

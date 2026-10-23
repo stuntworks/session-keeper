@@ -1,12 +1,14 @@
-# Last modified: 2026-10-22 | Change: Exact map: windows at their real spot, uniform scale, one tab row | Full history: git log
+# Last modified: 2026-10-22 | Change: Free Tk objects on the main thread at module end | Full history: git log
 """Display geometry only: real restore positions are never touched by these functions."""
 
 import tkinter as tk
 import unittest
 
 from keeper_map_layout import exact_layout
+from keeper_picker import SnapshotMap
 from keeper_terminal_view import Painter
 from keeper_theme import Theme
+from tk_test_support import free_tk_garbage
 
 M1 = {"x": 0, "y": 0, "w": 3840, "h": 2088, "primary": True}
 M2 = {"x": 3840, "y": 0, "w": 3840, "h": 2088, "primary": False}
@@ -62,6 +64,55 @@ class ExactLayoutTests(unittest.TestCase):
             self.assertAlmostEqual(screen["bar"]["w"], screen["screen"]["w"])
 
 
+PORTRAIT = {"x": 7680, "y": -600, "w": 1440, "h": 2520, "primary": False}
+SETUPS = {"one": [M1], "two": [M1, M2], "three with portrait": [M1, M2, PORTRAIT], "portrait only": [PORTRAIT]}
+
+
+# WHAT IT DOES: The map draws exactly the monitors the snapshot saved: one saved, one drawn; three, three.
+# DEPENDS ON: exact_layout and SnapshotMap.draw on a hidden Tk canvas.
+# AFFECTS: Someone with one monitor sees one monitor, centred and as large as fits.
+class MonitorCountTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        self.root.destroy()
+
+    def layout(self, monitors, area=(2400, 1200)):
+        return exact_layout(monitors, [], [], *area, gap=40, side=20, top=20, bar=60, chin=46, stand=64)
+
+    def test_layout_has_one_screen_per_saved_monitor(self):
+        for name, monitors in SETUPS.items():
+            with self.subTest(name):
+                self.assertEqual(len(self.layout(monitors)[0]), len(monitors))
+
+    def test_drawn_map_shows_one_monitor_per_saved_monitor(self):
+        view = SnapshotMap(self.root, theme=Theme(self.root, 3610))
+        view.size = (2400, 1200)
+        for name, monitors in SETUPS.items():
+            with self.subTest(name):
+                view.show({"monitors": monitors, "windows": []}, {}, set(), {})
+                self.assertEqual(len(view.canvas.find_withtag("bezel")), len(monitors))
+                self.assertEqual(len(view.canvas.find_withtag("stand")), len(monitors))
+
+    def test_one_monitor_is_centred_and_fills_the_space(self):
+        screens, _, _, scale = self.layout([M1])
+        bezel, stand = screens[0]["bezel"], screens[0]["stand"]
+        self.assertAlmostEqual(bezel["x"] + bezel["w"] / 2, 1200, delta=1)
+        self.assertAlmostEqual(stand["x"] + stand["w"] / 2, 1200, delta=1)
+        self.assertAlmostEqual(stand["y"] + stand["h"], 1200, delta=1, msg="height is the limit: no wasted space")
+
+    def test_portrait_monitor_stays_tall_with_its_stand_under_it(self):
+        screens, _, _, scale = self.layout([M1, PORTRAIT])
+        tall = screens[1]
+        self.assertAlmostEqual(tall["screen"]["h"] / tall["screen"]["w"], 2520 / 1440, places=6)
+        self.assertAlmostEqual(tall["stand"]["y"], tall["bezel"]["y"] + tall["bezel"]["h"])
+        self.assertAlmostEqual(tall["stand"]["x"] + tall["stand"]["w"] / 2, tall["bezel"]["x"] + tall["bezel"]["w"] / 2)
+        for screen in screens:
+            self.assertLessEqual(screen["stand"]["y"] + screen["stand"]["h"], 1200 + 0.01)
+
+
 # WHAT IT DOES: Tabs sit in ONE row like the real terminal, shortened to fit the window's real width.
 # DEPENDS ON: Painter.row_widths on a real (hidden) Tk canvas.
 class TabRowTests(unittest.TestCase):
@@ -108,6 +159,12 @@ class TabRowTests(unittest.TestCase):
         floor = self.painter.floor_width(info, compact=True)
         self.assertGreaterEqual(floor - self.painter.lead(info, compact=True),
                                 name_font.measure(info["label"][:6] + "…"))
+
+# WHAT IT DOES: Frees this module's Tk objects on the main thread before other tests start threads.
+# DEPENDS ON: tk_test_support.free_tk_garbage.
+# AFFECTS: Prevents the random Tcl_AsyncDelete abort in later tests.
+def tearDownModule():
+    free_tk_garbage()
 
 
 if __name__ == "__main__":

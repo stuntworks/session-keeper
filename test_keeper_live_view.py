@@ -1,9 +1,10 @@
-# Last modified: 2026-10-19 | Change: Verify live chat display without changing terminals | Full history: git log
+# Last modified: 2026-10-22 | Change: Free Tk objects on the main thread at module end | Full history: git log
 """The real Tk view is tested while withdrawn; inventories are synthetic."""
 import tkinter as tk
 import unittest
 from unittest.mock import patch
 from keeper_live_view import LiveChatsPanel,read_live_chats
+from tk_test_support import free_tk_garbage
 
 # WHAT IT DOES: Checks visible chats, workers, and failed scans stay distinct.
 # DEPENDS ON: A hidden Tk window and synthetic inventory.
@@ -56,5 +57,12 @@ class LiveViewTests(unittest.TestCase):
         self.assertEqual(result['windows'][0]['tabs'][0]['strippedTitle'],'Current')
         with patch('keeper_live_view.read_windows',side_effect=RuntimeError('unreadable')):
             with self.assertRaises(RuntimeError):read_live_chats()
+
+# WHAT IT DOES: Frees this module's Tk objects on the main thread before other tests start threads.
+# DEPENDS ON: tk_test_support.free_tk_garbage.
+# AFFECTS: Prevents the random Tcl_AsyncDelete abort in later tests.
+def tearDownModule():
+    free_tk_garbage()
+
 
 if __name__=='__main__':unittest.main()
