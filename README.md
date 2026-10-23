@@ -100,7 +100,7 @@ Session Keeper is an independent project. It is not made or endorsed by Anthropi
 - If Claude Code asks whether you trust a folder after a restore, answer it in that tab.
 - PowerShell and Windows Terminal profiles only. Git Bash and WSL tabs are not covered, and the **Copy command** lines are for PowerShell.
 - Session Keeper reads the session files Claude Code and Codex CLI save on your PC. Their format is not a public interface, so an update to either tool can break matching until Session Keeper is updated.
-- Tested with automated tests and live layout captures. A full recovery after a real reboot has not yet been verified end to end. Reports welcome.
+- Work in progress. Reports and suggestions welcome.
 
 ## License
 
