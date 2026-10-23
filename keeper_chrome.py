@@ -8,6 +8,9 @@ from keeper_theme import (AMBER, BEZEL, DIM, EDGE, GO, IC_COPY, IC_PREVIEW, IC_R
                           STEEL, FlatButton, checkbox, label, rounded)
 
 SAVED, NOW = "saved", "now"
+GUIDE_STEPS = ("Crashed? Press Restore all (bottom right) to bring everything back.",
+               "Want one chat? Click its tab, then press Open it for me.",
+               "Grey = already open.  Red dot = missing.  Green = picked.")
 
 
 # WHAT IT DOES: The header: SESSION KEEPER, the Saved recovery / On screen now switch, the legend,
@@ -40,6 +43,21 @@ class Header(tk.Frame):
         self.auto_box = checkbox(second, t, "Restore saved chats at next Windows login (10-second Stop countdown)",
                                  auto_var, on_auto)
         self.auto_box.pack(side="right")
+        # Where to start, for someone who has never seen the screen. Saved recovery only.
+        # Green frame and green step numbers so the eye lands here first.
+        self.guide = tk.Frame(self, background=BEZEL, highlightthickness=px(2), highlightbackground=GO,
+                              highlightcolor=GO)
+        label(self.guide, t, "HOW TO USE", kind="display", size=24, colour=GO, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=(px(20), px(28)), pady=px(14))
+        for number, text in enumerate(GUIDE_STEPS, start=1):
+            step = tk.Frame(self.guide, background=BEZEL)
+            step.grid(row=0, column=number, sticky="w", padx=(0, px(28)), pady=px(14))
+            label(step, t, str(number), kind="display", size=28, colour=GO).pack(side="left", padx=(0, px(10)))
+            label(step, t, text, size=20, colour=INK, anchor="w", justify="left",
+                  wraplength=px(620)).pack(side="left")
+            self.guide.grid_columnconfigure(number, weight=1)
+        self.guide_gap = px(14)
+        self.guide.pack(fill="x", pady=(self.guide_gap, 0))
         self.notice_label = label(self, t, size=19, colour=AMBER, anchor="w", justify="left")
 
     # WHAT IT DOES: Open / Missing / Selected swatches drawn exactly like the tabs they explain.
@@ -62,8 +80,12 @@ class Header(tk.Frame):
         # The legend explains the map's tabs, so it only shows where the map is.
         if name == SAVED:
             self.legend.pack(side="right")
+            # Above the notice line when one is showing, so the order never changes.
+            place = {"before": self.notice_label} if self.notice_label.winfo_manager() else {}
+            self.guide.pack(fill="x", pady=(self.guide_gap, 0), **place)
         else:
             self.legend.pack_forget()
+            self.guide.pack_forget()
 
     # WHAT IT DOES: Shows a notice line (old capture note, workers not restored), or hides it when empty.
     def set_notice(self, text):

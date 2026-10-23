@@ -6,6 +6,8 @@ from keeper_theme import AMBER, BEZEL, BLACK, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO
 from keeper_terminal_view import fit_text
 
 ROW_H, NAME_SIZE, NOTE_SIZE = 64, 24, 19       # design pixels: large, readable rows
+HINT_H = 44                                     # design pixels: the direction line above the rows
+MENU_HINT = "Click a missing chat to pick it, then press Restart."
 NOTES = {"live": "already open", "missing": "missing", "selected": "selected", "unknown": "not identified"}
 
 
@@ -19,17 +21,24 @@ def draw_menu(painter, anchor, rows, area_w, area_h):
     left_pad = px(20 + 16 + 34)
     note_w = max(note_font.measure(text) for text in NOTES.values())
     widest = max(name_font.measure(info["label"]) for _, info in rows)
-    width = min(left_pad + widest + px(28) + note_w + px(20), area_w - px(40))
-    height = px(ROW_H) * len(rows) + px(16)
+    hint_font = theme.font("body", NOTE_SIZE)
+    width = min(max(left_pad + widest + px(28) + note_w + px(20), hint_font.measure(MENU_HINT) + px(44)),
+                area_w - px(40))
+    height = px(HINT_H) + px(ROW_H) * len(rows) + px(16)
     x = min(max(anchor[0], px(20)), area_w - width - px(20))
     y = anchor[3] + px(6)
     if y + height > area_h - px(10):
         y = max(anchor[1] - px(6) - height, px(10))
     canvas.create_polygon(rounded(x, y, x + width, y + height, px(10)), smooth=True, fill=BEZEL, outline=INK,
                           width=px(2), tags=("menu",))
+    # One line of direction above the rows, so a first-time user knows what a click does.
+    canvas.create_text(x + px(22), y + px(8) + px(HINT_H) / 2, text=MENU_HINT, anchor="w", font=hint_font,
+                       fill=DIM, tags=("menu",))
+    canvas.create_line(x + px(14), y + px(8 + HINT_H), x + width - px(14), y + px(8 + HINT_H), fill=EDGE,
+                       tags=("menu",))
     rects = {}
     for number, (key, info) in enumerate(rows):
-        top = y + px(8) + number * px(ROW_H)
+        top = y + px(8) + px(HINT_H) + number * px(ROW_H)
         tag = f"menu-row:{key}"
         state = info["state"]
         selected = state == "selected"

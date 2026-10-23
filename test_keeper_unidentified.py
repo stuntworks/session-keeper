@@ -1,8 +1,8 @@
-# Last modified: 2026-10-22 | Change: Unidentified-restore tests take a throwaway lock | Full history: git log
+# Last modified: 2026-10-22 | Change: An unidentified Claude always stops a clicked restore | Full history: git log
 """Live restore test 2026-10-22: one unidentified Claude (no pid record) paused every manual restore.
 
-A clicked restore may pass an unidentified process only when its own launch command proves it cannot be
-any selected conversation, or when the user clicks "Restore anyway". Login auto-restore stays fully strict."""
+A clicked restore stops on every unidentified Claude or Codex. No launch command is proof.
+"Restore anyway" is the only way past it. Login auto-restore stays fully strict."""
 
 import unittest
 from types import SimpleNamespace
@@ -39,16 +39,25 @@ def ids(rows, strict):
 
 
 class ProofTests(unittest.TestCase):
-    # WHAT IT DOES: A plain `claude` started a NEW conversation, so it cannot be the saved one.
-    def test_plain_new_claude_does_not_block_a_clicked_restore(self):
-        self.assertEqual(ids([KNOWN_ROW, unknown(["claude.exe"])], LiveCheck(ROWS)), {KNOWN})
-
-    def test_model_flag_alone_is_still_new(self):
-        self.assertEqual(ids([unknown(["claude.exe", "--model", "x"])], LiveCheck(ROWS)), set())
-
-    # WHAT IT DOES: --continue only reopens a chat from its own folder; a different folder is proof.
-    def test_continue_in_another_folder_does_not_block(self):
-        self.assertEqual(ids([unknown(["claude.exe", "--model", "m", "--continue"])], LiveCheck(ROWS)), set())
+    # WHAT IT DOES: Every unidentified Claude stops a clicked restore, whatever its launch command says.
+    # DEPENDS ON: A fake inventory and LiveCheck (the clicked-restore check).
+    # AFFECTS: The pause names the tab and tells the user about Restore anyway.
+    def test_unidentified_claude_always_blocks_a_clicked_restore(self):
+        cases = (
+            ("bare", ["claude.exe"], r"C:\Work\Other"),
+            ("model", ["claude.exe", "--model", "x"], r"C:\Work\Other"),
+            ("other id", ["claude.exe", "-r", OTHER], r"C:\Work\Other"),
+            ("resume equals", ["claude.exe", f"--resume={OTHER}"], r"C:\Work\Other"),
+            ("continue other folder", ["claude.exe", "-c"], r"C:\Work\Other"),
+            ("continue subfolder", ["claude.exe", "--continue"], r"C:\Work\Outreach\sub"),
+        )
+        for name, command, folder in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(UnidentifiedSessions) as caught:
+                    ids([unknown(command, folder=folder, title="Some tab")], LiveCheck(ROWS))
+                text = str(caught.exception)
+                self.assertIn("Some tab", text)
+                self.assertIn("Restore anyway", text)
 
     def test_continue_in_the_saved_folder_blocks(self):
         with self.assertRaises(UnidentifiedSessions):
@@ -57,10 +66,6 @@ class ProofTests(unittest.TestCase):
     def test_continue_with_unknown_folder_blocks(self):
         with self.assertRaises(UnidentifiedSessions):
             ids([unknown(["claude.exe", "--continue"], folder=None)], LiveCheck(ROWS))
-
-    def test_resume_of_a_different_id_does_not_block(self):
-        self.assertEqual(ids([unknown(["claude.exe", "-r", OTHER])], LiveCheck(ROWS)), set())
-        self.assertEqual(ids([unknown(["claude.exe", f"--resume={OTHER}"])], LiveCheck(ROWS)), set())
 
     def test_resume_of_the_saved_id_blocks(self):
         with self.assertRaises(UnidentifiedSessions):
@@ -87,6 +92,34 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(ids([KNOWN_ROW, unknown(["claude.exe", "-r"])], LiveCheck(ROWS, override=True)), {KNOWN})
 
     # WHAT IT DOES: The pause names which tab and folder could not be identified.
+    # WHAT IT DOES: Two open main transcripts stay unidentified, and that process stops a clicked restore.
+    # DEPENDS ON: Synthetic transcript files and a launch command the old proof used to trust.
+    # AFFECTS: Nothing outside the test. No terminal is launched.
+    def test_two_open_transcripts_block_a_clicked_restore(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from keeper_claude_identity import open_claude_record
+        first = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            paths = []
+            for sid in (first, OTHER):
+                project = root / "project"
+                project.mkdir(parents=True, exist_ok=True)
+                path = project / (sid + ".jsonl")
+                path.write_text(json.dumps({"sessionId": sid, "isSidechain": False, "cwd": "test"}) + "\n",
+                                 encoding="utf-8")
+                paths.append(path)
+            process = SimpleNamespace(open_files=lambda: [SimpleNamespace(path=str(path)) for path in paths])
+            self.assertIsNone(open_claude_record(process, root))
+        row = unknown(["claude.exe", "-r", OTHER], title="Ambiguous tab")
+        with self.assertRaises(UnidentifiedSessions) as caught:
+            ids([row], LiveCheck(ROWS))
+        text = str(caught.exception)
+        self.assertIn("Ambiguous tab", text)
+        self.assertIn("Restore anyway", text)
+
     def test_error_names_the_tab_and_folder(self):
         with self.assertRaises(UnidentifiedSessions) as caught:
             ids([unknown(["claude.exe", "-r"], folder="C:\\Work\\Crypto", title="Crypto tab")], LiveCheck(ROWS))
@@ -114,9 +147,14 @@ class RestorePathTests(unittest.TestCase):
              patch("keeper_restore.read_live_groups", return_value=[]):
             return restore_selected(snapshot(), {"0:0"}, True, lock_name="unittest-restore", **options)
 
-    def test_clicked_restore_opens_past_a_new_claude(self):
-        restored, warnings = self.run_dry([unknown(["claude.exe"])], manual=True)
-        self.assertEqual(restored, ["Outreach"])
+    # WHAT IT DOES: A clicked restore stops on a plain new claude instead of opening the saved chat.
+    # DEPENDS ON: A dry-run restore and a fake unidentified process.
+    # AFFECTS: Nothing is reported as opened.
+    def test_clicked_restore_stops_on_a_new_claude(self):
+        with self.assertRaises(UnidentifiedSessions) as caught:
+            self.run_dry([unknown(["claude.exe"], title="Some tab")], manual=True)
+        self.assertIn("Some tab", str(caught.exception))
+        self.assertIn("Restore anyway", str(caught.exception))
 
     # WHAT IT DOES: Login auto-restore stops; the screen then shows the fix-it text and the button.
     def test_login_restore_still_stops(self):

@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Restore lock name can be passed; the default is still the real restore lock | Full history: git log
+# Last modified: 2026-10-22 | Change: An unidentified Claude always stops a clicked restore | Full history: git log
 """Launch selected absent CLI sessions and position only their verified new windows."""
 
 import os
@@ -29,9 +29,6 @@ def clean_environment():
             and not (key.upper() == "COLORTERM" and not value)}
 
 
-CLAUDE_RESUME_FLAGS = {"-r", "--resume", "-c", "--continue", "--session-id", "--from-pr", "--fork-session"}
-
-
 # WHAT IT DOES: Raised when an open CLI cannot be tied to a session; carries the processes for the fix-it text.
 # DEPENDS ON: live_inventory rows (title, folder, kind).
 # AFFECTS: The recovery screen shows these and offers "Restore anyway" for a clicked restore only.
@@ -54,8 +51,8 @@ def describe_unidentified(session):
 
 
 # WHAT IT DOES: The strict= value for a restore the user started by clicking (never the login auto-restore).
-# DEPENDS ON: The selected recovery rows (session_id, cwd).
-# AFFECTS: override=True is only ever set by the explicit "Restore anyway" button.
+# DEPENDS ON: Nothing about the process command line. A /resume inside a running Claude is not visible there.
+# AFFECTS: override=True is only ever set by the explicit "Restore anyway" button. Every unidentified CLI still blocks.
 class LiveCheck:
     def __init__(self, rows=(), override=False):
         self.rows = list(rows)
@@ -63,42 +60,6 @@ class LiveCheck:
 
     def __bool__(self):
         return True
-
-
-# WHAT IT DOES: Proves from its own launch command that an unidentified Claude cannot be any selected chat.
-# DEPENDS ON: The process command line and working folder recorded by live_inventory.
-# AFFECTS: Anything unprovable (no command, Codex, resume picker, same folder) still blocks.
-# DANGER ZONE HIGH: Proof rules / breaks: duplicate chats if a rule is too loose / depends on: Claude CLI flag meanings.
-# Residual: a chat switched inside a running Claude with /resume is not visible here.
-def provably_not_selected(session, rows):
-    from keeper_core import SESSION_ID
-    command = session.get("command")
-    if session.get("kind") != "claude" or not command or not rows:
-        return False
-    selected = {row["session_id"].casefold() for row in rows}
-    arguments = list(command[1:])
-    index = 0
-    while index < len(arguments):
-        argument = arguments[index]
-        if argument == "--":
-            break
-        name, _, inline = argument.partition("=") if argument.startswith("--") else (argument, "", "")
-        if name in ("-c", "--continue"):
-            folder = session.get("processCwd")
-            if not folder or any(not row.get("cwd") or same_folder(row["cwd"], folder) for row in rows):
-                return False
-        elif name in CLAUDE_RESUME_FLAGS:
-            value = inline or (arguments[index + 1] if index + 1 < len(arguments) else "")
-            if not SESSION_ID.fullmatch(value) or value.casefold() in selected:
-                return False
-            if not inline:
-                index += 1
-        index += 1
-    return True
-
-
-def same_folder(left, right):
-    return os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right))
 
 
 # WHAT IT DOES: Reads console titles for just the blocking processes, so the pause can name their tabs.
@@ -116,22 +77,23 @@ def with_titles(sessions):
 
 
 # WHAT IT DOES: Returns the unidentified interactive processes this check must stop on.
+# DEPENDS ON: strict is False for a display refresh, True for login, or a LiveCheck for a clicked restore.
+# AFFECTS: Every unidentified Claude or Codex stops the restore. Only Restore anyway (override) lets them through.
+# DANGER ZONE HIGH: No launch-command exception / breaks: the same chat opens twice / depends on: uncertain rows from the inventory.
 def blocking_sessions(sessions, strict):
     if not strict:
         return []
     found = [session for session in sessions
              if session.get("uncertain") and session.get("role") not in ("worker", "service")]
-    if isinstance(strict, LiveCheck):
-        if strict.override:
-            return []
-        found = [session for session in found if not provably_not_selected(session, strict.rows)]
+    if isinstance(strict, LiveCheck) and strict.override:
+        return []
     return found
 
 
 # WHAT IT DOES: Lists verified live Claude and Codex IDs, optionally rejecting unresolved CLI processes.
 # DEPENDS ON: Current process inventory and session records.
-# AFFECTS: Duplicate prevention fails if this inventory is stale. strict=True (login) stops on every
-# unidentified CLI; a LiveCheck (clicked restore) passes ones proven not selected, or all after "Restore anyway".
+# AFFECTS: Duplicate prevention fails if this inventory is stale. Login (strict=True) and a clicked restore
+# (a LiveCheck) both stop on every unidentified CLI. Only "Restore anyway" passes them.
 # DANGER ZONE HIGH: Strict wait / breaks: duplicate sessions if it stops failing closed / depends on: a just-launched CLI registering within STRICT_WAIT_SECONDS.
 def live_session_ids(strict=False):
     from keeper_inventory import live_inventory
@@ -381,8 +343,8 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
     return restored, warnings
 
 
-# WHAT IT DOES: Chooses the live check: login auto-restore is fully strict; a clicked restore may pass CLIs
-# proven not to be a selected chat, or all unidentified ones after the explicit "Restore anyway" click.
+# WHAT IT DOES: Chooses the live check. Login auto-restore and a clicked restore both stop on every
+# unidentified CLI. Only the explicit "Restore anyway" click passes them.
 # DEPENDS ON: recovery_rows for the selected keys.
 # AFFECTS: Which unidentified processes stop recovery.
 def live_check(snapshot, selected_keys, manual, override):

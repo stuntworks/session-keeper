@@ -1,8 +1,8 @@
 # Session Keeper
 
-Crash and reboot recovery for Claude Code and Codex CLI sessions on Windows Terminal.
+Session Keeper is free Windows software that restores Claude Code and Codex CLI sessions in Windows Terminal after a crash or reboot, in the same windows, tab order, and screen positions.
 
-Built using [vozsay.com](https://vozsay.com). Talk to your coding agents instead of typing to them.
+Built using the [VozSay](https://vozsay.com) speech-to-text app: we talked to our coding agents instead of typing.
 
 If you run many AI coding sessions at once, a crash or reboot loses all of them: which conversation was in which tab, which tabs shared a window, and where each window sat on screen. Session Keeper records that layout in the background. After a crash, you pick which sessions to bring back, and it reopens each one in its own window, tab order and screen position, resuming its own conversation.
 
@@ -54,10 +54,10 @@ You do nothing. The recorder runs silently and saves a snapshot about every two 
 1. Double-click **Session Keeper** on your desktop. The recovery screen opens large on the monitor your mouse is on.
 2. **Saved recovery** draws your monitors side by side with each saved terminal window as a box at its real spot. Each box shows its tabs as buttons. Windows that were minimised are listed in a strip underneath.
 3. Tab colours: grey = already open (nothing opens twice), white with a red dot = missing, green = selected, **?** = could not be identified and is never restored. Hover a tab for its full name.
-4. Click the missing tabs you want. Click a window's title bar to select all its missing tabs, or press **Select all** (formerly "Check all available") for every window.
-5. Press **Preview** to see exactly what would happen, or **Restart selected** (formerly "Restart checked") to do it.
+4. The green **HOW TO USE** bar at the top says where to start. To bring everything back, press **Restore all N missing** (bottom right) with nothing selected. To bring back only some, click those tabs (or a window's title bar for all its missing tabs, or **Select all**), then press **Restart N selected**. When every saved chat is already open, the bottom bar says there is nothing to restore.
+5. Press **Preview** to see exactly what would happen before you restart.
 6. A missing tab whose window is still open is added back into that same window. Otherwise each conversation reopens grouped into its original window at its original spot. If another window is sitting on that spot, it opens on top of it and the report says so ("opened on top of ...; drag it where you want"). Nothing is closed.
-7. Click any tab on the map to see its exact resume command at the top of the details panel, with **Copy command** and **Open it for me**. The command is two plain lines: the first goes to the saved folder, and the second resumes that chat. For a chat that is already running the button is **Open a second copy**, with a warning that two copies of one chat can overwrite each other's history.
+7. Click any tab on the map to see its exact resume command at the top of the details panel, with how to use it, plus **Copy command** and **Open it for me**. The command is two plain lines: the first goes to the saved folder, and the second resumes that chat. For a chat that is already running the button is **Open a second copy**, with a warning that two copies of one chat can overwrite each other's history.
 8. If recovery stops or skips a tab, the panel on the right says which tab (and which window and monitor), what to do about it, and shows that tab's command with **Copy command** and **Open it for me**. If an open Claude or Codex tab cannot be identified, it names that tab and offers **Restore anyway**; nothing goes ahead past it until you click that.
 9. **Copy command** (green when tabs are selected) copies two plain lines per tab. The first line goes to the saved folder. The second line resumes the chat (`claude -r <session id>` or `codex resume <id>`). Nothing is copied when that folder is no longer there. Paste the lines into PowerShell if the automatic restore fails.
 10. **Saved layout** picks an earlier moment: Latest, Before last reboot, 15 min ago, 1 hour ago, earlier today, or previous days.
@@ -69,7 +69,7 @@ You do nothing. The recorder runs silently and saves a snapshot about every two 
 - Never opens a conversation that is already running. The only way to get a second copy is the explicit **Open a second copy** button on that one tab.
 - Never stops because a spot is covered: the restored window opens on top of whatever is there, and the report names it so you can drag it.
 - Never guesses. A tab it cannot tie to one exact conversation is shown but not restored.
-- If an open Claude or Codex tab cannot be identified, recovery stops so it cannot open a chat twice. A clicked restore still goes ahead when that tab's own launch command proves it is a different chat (a plain `claude`, `claude -r <other id>`, or `claude --continue` in another folder). Otherwise it names the tab and waits for you: type a message in it or close it and press **Restart selected** again, or click **Restore anyway**. The automatic login restore never goes past an unidentified tab on its own.
+- If an open Claude or Codex tab cannot be identified, recovery stops so it cannot open a chat twice. Otherwise it names the tab and waits for you: type a message in it or close it and press **Restart selected** again, or click **Restore anyway**. The automatic login restore never goes past an unidentified tab on its own.
 - Never closes a window on its own. If empty leftover terminals (bare prompts, no program running) sit on a saved spot, it asks once: **Close empty ones and restart**, **Restart on top of them**, or **Cancel** (the default). A terminal with a running chat, or one it cannot check, is never offered for closing. The automatic login restore never closes anything.
 
 ## Commands
@@ -112,5 +112,5 @@ If you redistribute Session Keeper or build on it, keep the NOTICE file with you
 
 Session Keeper is made by StuntWorks. We build the tools we use every day and share the ones that might help others. We hope you find it useful.
 
-- [VozSay](https://vozsay.com): offline voice typing for any Windows app, including your terminal. Session Keeper was built with it. Free 14-day trial.
+- [VozSay](https://vozsay.com): offline voice typing for any Windows app, including your terminal. Free 14-day trial.
 - [CorridorKey StuntWorks](https://github.com/stuntworks/CorridorKey-StuntWorks): our edition of CorridorKey for DaVinci Resolve, After Effects and Premiere. It keys the green screen and also clears the garbage around it, so an imperfect green screen is done in a click or two. Updates coming soon.

@@ -272,6 +272,8 @@ class RecoveryWindow(RecoveryScreen):
     # DEPENDS ON: Restore planner and the user pressing Restart selected.
     # AFFECTS: Creates and positions terminal windows; closes only windows the user approved.
     def restart(self):
+        if not self.selected():
+            self.check_all()            # "Restore all": nothing picked means every missing tab
         self.begin_operation(dry_run=False, ask=True)
 
     # WHAT IT DOES: Drawer "Restart this tab": the same guarded restore, for that one missing tab only.

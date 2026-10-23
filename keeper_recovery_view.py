@@ -76,7 +76,7 @@ class RecoveryScreen:
         tabs = sum(len(window.get("tabs", [])) for window in windows)
         monitors = len(self.snapshot.get("monitors") or [])
         parts = [f"Saved {saved_time(self.snapshot)}"] + ([f"{monitors} monitors"] if monitors > 1 else [])
-        parts += [f"{len(windows)} windows", f"{tabs} tabs", "Click a tab to see how to bring it back"]
+        parts += [f"{len(windows)} windows", f"{tabs} tabs"]
         self.header.sub_label.configure(text="  ·  ".join(parts))
 
     # WHAT IT DOES: Updates the count and which bar buttons can be used.
@@ -93,8 +93,17 @@ class RecoveryScreen:
                                       state="normal" if saved and choosable else "disabled")
         self.copy_button.configure(state=ready, text="Copy command", icon=IC_COPY)
         self.bar.preview_btn.configure(state=ready)
-        self.bar.restart_btn.configure(state=ready, text=f"Restart {count} selected" if count else "Restart selected")
-        self.copy_status.configure(text="" if saved else "Switch to Saved recovery to pick tabs", foreground=GO)
+        # Nothing picked: the big button restores every missing tab, and the note says so.
+        restore_all = saved and not count and choosable and not self.busy
+        if restore_all:
+            self.bar.restart_btn.configure(state="normal", text=f"Restore all {len(choosable)} missing")
+        else:
+            self.bar.restart_btn.configure(state=ready, text=f"Restart {count} selected" if count else "Restart selected")
+        note = ("To bring everything back, press Restore all. To bring back only some, click those tabs first."
+                if restore_all else "")
+        if saved and not choosable and not self.busy:
+            note = "Every chat here is already open, so there is nothing to restore."
+        self.copy_status.configure(text=note if saved else "Switch to Saved recovery to pick tabs", foreground=GO)
 
     # WHAT IT DOES: Select all, or Clear all when every missing tab is already selected.
     # DEPENDS ON: The map's tab states.

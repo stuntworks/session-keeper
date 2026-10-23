@@ -406,6 +406,32 @@ class PickerWindowTests(unittest.TestCase):
         view.map.close_detail()
         self.assertEqual(view.map.drawer.winfo_manager(), "")
 
+    def test_nothing_picked_offers_restore_all_with_a_note(self):
+        view = self.view
+        view.selection_changed()
+        self.assertTrue(view.bar.restart_btn.cget("text").startswith("Restore all"))
+        self.assertEqual(view.bar.restart_btn["state"], "normal")
+        self.assertIn("press Restore all", view.copy_status.cget("text"))
+        view.map.toggle("1:1")
+        self.assertEqual(view.bar.restart_btn.cget("text"), "Restart 1 selected")
+        self.assertEqual(view.copy_status.cget("text"), "")
+
+    def test_how_to_use_guide_shows_on_saved_recovery_only(self):
+        view = self.view
+        view.show_view("saved")
+        self.assertEqual(view.header.guide.winfo_manager(), "pack")
+        view.show_view("now")
+        self.assertEqual(view.header.guide.winfo_manager(), "")
+        view.show_view("saved")
+        self.assertEqual(view.header.guide.winfo_manager(), "pack")
+
+    def test_nothing_missing_says_why_buttons_are_off(self):
+        view = self.view
+        with patch.object(view.map, "tab_state", return_value="live"):
+            view.selection_changed()
+        self.assertEqual(view.bar.select_btn["state"], "disabled")
+        self.assertIn("already open", view.copy_status.cget("text"))
+
     def test_bar_buttons_disabled_on_screen_now(self):
         view = self.view
         view.map.toggle("1:1")

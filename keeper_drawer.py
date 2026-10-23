@@ -14,6 +14,7 @@ except ImportError:
     agent_facts = format_facts = None
 
 READING = "Reading…"
+HOW_TO_PASTE = "Copy it, paste into a new PowerShell tab, press Enter. Or press Open it for me."
 PILLS = {"missing": ("Missing", None, AMBER, AMBER, (5, 3)), "selected": ("Missing · selected", GO, "#000000", GO, None),
          "live": ("Open", OPEN_FILL, INK, STEEL, None), "unknown": ("Can't be identified", None, INK, STEEL, (2, 3))}
 
@@ -62,9 +63,10 @@ class Drawer(tk.Frame):
         buttons = tk.Frame(frame, background=BEZEL)
         buttons.pack(side="bottom", fill="x", padx=pad, pady=(px(10), pad))
         self.restart_btn = FlatButton(buttons, t, "Open it for me", self.restart_one, kind="go", icon=IC_RESTART)
-        self.restart_btn.pack(side="bottom", fill="x", pady=(px(14), 0))
+        # Side by side, not stacked: one row of height, so the facts above are never cut off.
+        self.restart_btn.pack(side="right", fill="x", expand=True, padx=(px(10), 0))
         self.copy_btn = FlatButton(buttons, t, "Copy command", self.copy_detail, kind="line", icon=IC_COPY)
-        self.copy_btn.pack(side="bottom", fill="x")
+        self.copy_btn.pack(side="left", fill="x", expand=True)
         self.copy_status = self.copy_btn            # the button itself says "Copied"
         head = tk.Frame(frame, background=BEZEL)
         head.pack(fill="x", padx=pad, pady=(pad, 0))
@@ -94,6 +96,8 @@ class Drawer(tk.Frame):
         # The command sits right under the name, so a long fact list can never push it out of view.
         label(frame, t, "RESTART CODE", kind="display", size=18, colour=DIM, anchor="w").pack(
             fill="x", padx=pad, pady=(px(14), px(8)), before=self.rows)
+        label(frame, t, HOW_TO_PASTE, size=17, colour=DIM, anchor="w", justify="left", wraplength=px(390)).pack(
+            fill="x", padx=pad, pady=(0, px(8)), before=self.rows)
         self.command_box = tk.Text(frame, height=3, wrap="char", font=t.font("mono", 17), background=TERM,
                                    foreground=INK, insertbackground=INK, selectbackground=OPEN_FILL,
                                    relief="flat", highlightthickness=1, highlightbackground=EDGE,
@@ -167,12 +171,18 @@ class Drawer(tk.Frame):
         self.draw_pill(info["state"])
         self.command_box.delete("1.0", "end")
         self.command_box.insert("1.0", info["command"])
-        lines = max(2, min(5, int(self.command_box.count("1.0", "end", "displaylines")[0])
+        self.command_box.update_idletasks()         # wrap at the real width before counting lines
+        lines =max(2, min(5, int(self.command_box.count("1.0", "end", "displaylines")[0])
                            if info["command"] else 2))
         self.command_box.configure(height=lines)
         self.shown_command = info["command"]
         note = info["note"]
         self.note_label.configure(text=note or "")
+        # An empty note takes no room, so the facts below are not pushed under the buttons.
+        if note:
+            self.note_label.pack(fill="x", padx=self.pad(), pady=(_px(14), 0), before=self.rows)
+        else:
+            self.note_label.pack_forget()
         self.copy_btn.configure(state="normal" if info["can_copy"] else "disabled")
         self.restart_btn.configure(state="normal" if info["can_restart"] else "disabled",
                                    text="Open a second copy" if info.get("second_copy") else "Open it for me")
@@ -273,6 +283,8 @@ class Drawer(tk.Frame):
         if commands:
             label(self.message_extra, t, "OPEN THEM YOURSELF", kind="display", size=18, colour=DIM,
                   anchor="w").pack(fill="x", pady=(0, px(6)))
+            label(self.message_extra, t, HOW_TO_PASTE, size=17, colour=DIM, anchor="w", justify="left",
+                  wraplength=px(400)).pack(fill="x", pady=(0, px(6)))
         for entry in commands[:4]:
             label(self.message_extra, t, entry["title"], size=19, anchor="w", justify="left",
                   wraplength=px(400)).pack(fill="x", pady=(px(6), px(4)))
@@ -282,6 +294,8 @@ class Drawer(tk.Frame):
             box.insert("1.0", entry["text"])
             box.configure(state="disabled")
             box.pack(fill="x")
+            # One spare line for the wrapped id, so its end is never hidden below the box edge.
+            box.configure(height=entry["text"].count("\n") + 2)
             row = tk.Frame(self.message_extra, background=BEZEL)
             row.pack(fill="x", pady=(px(6), 0))
             copy = FlatButton(row, t, "Copy command", lambda text=entry["text"]: self.copy_text(text), kind="line",
