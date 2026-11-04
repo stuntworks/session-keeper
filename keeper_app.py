@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Recovery screen reads this PC's monitor names and wallpapers once it opens | Full history: git log
+# Last modified: 2026-11-03 | Change: UI error and freeze logs switched on for recover and watch (keeper_uiguard) | Full history: git log
 """Session Keeper: record terminal groups and offer a safe recovery menu."""
 
 import argparse
@@ -32,6 +32,7 @@ from keeper_live_view import LiveChatsPanel
 from keeper_loading import LoadingWindow, load_then_show
 from keeper_single import claim_recover_screen, publish_window
 from keeper_start import load_recovery_start
+from keeper_uiguard import install as install_ui_guard
 
 INTERVAL_MS = 120_000
 
@@ -515,6 +516,7 @@ def main():
     make_dpi_aware()
     root = tk.Tk()
     root.withdraw()
+    install_ui_guard(root, DATA)    # Tk errors and freezes are written to ui_errors.log and ui_freeze.log in data
     if arguments.mode == "watch":
         with exclusive_operation("watch"):
             # DANGER ZONE HIGH: Only opted-in previous-boot recovery may show on login.

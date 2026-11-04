@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Monitors drawn as real monitors with their real names and wallpapers | Full history: git log
+# Last modified: 2026-11-03 | Change: Hover popup moved to keeper_hovertip (fixes the hover freeze) | Full history: git log
 """The monitor map IS the menu. Display only: it never launches, moves or closes anything."""
 
 import tkinter as tk
@@ -7,6 +7,7 @@ from tkinter import ttk
 from keeper_chooser import captured, clock
 from keeper_desktop_look import match, tinted_desktop
 from keeper_drawer import Drawer
+from keeper_hovertip import HoverTip
 from keeper_map_layout import exact_layout, split_windows
 from keeper_tabdetails import tab_details
 from keeper_tabmenu import draw_menu
@@ -36,6 +37,7 @@ class SnapshotMap(tk.Frame):
                                     style="Keeper.Vertical.TScrollbar")
         self.canvas.configure(yscrollcommand=self.scroll.set)
         self.painter = Painter(self.canvas, self.theme)
+        self.tips = HoverTip(self.canvas, self.theme, lambda: self.size, TIP_SIZE)
         # The drawer's widgets, under the names the rest of the app (and its tests) use.
         self.command_box, self.copy_btn = self.drawer.command_box, self.drawer.copy_btn
         self.copy_status, self.note_label = self.drawer.copy_status, self.drawer.note_label
@@ -318,9 +320,7 @@ class SnapshotMap(tk.Frame):
             self.tab_boxes[key] = rect
             tag = f"tab:{key}"
             x, y, w, h = rect
-            self.canvas.tag_bind(tag, "<Enter>", lambda event, k=key, px=x, py=y + h:
-                                 self.show_tip(self.tab_names(k)[1], px, py))
-            self.canvas.tag_bind(tag, "<Leave>", lambda event: self.canvas.delete("tip"))
+            self.tips.attach(tag, tag, self.tab_names(key)[1], x, y + h)
             self.canvas.tag_bind(tag, "<Button-1>", lambda event, k=key: self.select_tab(k))
         self.overflow[index] = [key for key in keys if key not in rects]
         if self.overflow[index]:      # "+N ⌄" opens the list of tabs that did not fit the row
@@ -346,8 +346,7 @@ class SnapshotMap(tk.Frame):
             where = "minimised" if self.homes.get(index) is None else "hidden behind other windows"
             tip = f"{self.window_title(index)}\n({where}; {', '.join(t for t, _ in self.footer(index))})"
             self.bar_boxes[index] = rects[tag]
-            self.canvas.tag_bind(tag, "<Enter>", lambda event, t=tip, px=x, py=y: self.show_tip(t, px, py, above=True))
-            self.canvas.tag_bind(tag, "<Leave>", lambda event: self.canvas.delete("tip"))
+            self.tips.attach(tag, tag, tip, x, y, above=True)
             self.canvas.tag_bind(tag, "<Button-1>", lambda event, i=index: self.click_button(i))
 
     # WHAT IT DOES: Taskbar button click: like the window's title strip (selects its missing tabs, or
@@ -364,23 +363,6 @@ class SnapshotMap(tk.Frame):
         self.fill_detail(self.detail_key)
         self.draw()
 
-    # WHAT IT DOES: A large popover with the full text near the pointer, kept inside the map.
-    # AFFECTS: One temporary canvas item group.
-    def show_tip(self, text, x, y, above=False):
-        self.canvas.delete("tip")
-        px = self.theme.px
-        wrap = max(min(self.size[0] - px(60), px(1500)), px(300))
-        item = self.canvas.create_text(0, 0, anchor="nw", tags=("tip",), fill=INK, width=wrap,
-                                       font=self.theme.font("body", TIP_SIZE), text=text)
-        left, top, right, bottom = self.canvas.bbox(item)
-        tx = min(max(x, px(20)), self.size[0] - (right - left) - px(20))
-        ty = y - (bottom - top) - px(18) if above else y + px(14)
-        self.canvas.move(item, tx, max(ty, px(10)))
-        left, top, right, bottom = self.canvas.bbox(item)
-        back = self.canvas.create_rectangle(left - px(14), top - px(10), right + px(14), bottom + px(10),
-                                            fill=BEZEL, outline=INK, width=px(2), tags=("tip",))
-        self.canvas.tag_lower(back, item)
-
     # WHAT IT DOES: "+N ⌄" click: opens that window's overflow list, or closes it if it is already open.
     def press_more(self, index):
         self.menu_hit = True
@@ -392,7 +374,7 @@ class SnapshotMap(tk.Frame):
     # WHAT IT DOES: Opens the dropdown listing every tab of this window that did not fit its row.
     # AFFECTS: Canvas items tagged "menu" only.
     def open_menu(self, index):
-        self.canvas.delete("tip")
+        self.tips.hide()
         self.menu_window = index
         self.draw_menu()
 
