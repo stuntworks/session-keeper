@@ -121,8 +121,8 @@ class TabRowTests(unittest.TestCase):
         self.root.withdraw()
         self.painter = Painter(tk.Canvas(self.root), Theme(self.root, 3610))
         self.infos = [{"label": name, "state": "missing", "kind": "claude"} for name in
-                      ("Website redesign", "Context.dev setup notes", "Davinci Resolve scripting",
-                       "Marketing plan", "V")]
+                      ("Vozsay website redesign", "Context.dev setup notes", "Davinci Resolve scripting",
+                       "Storefront launch plan", "V")]
 
     def tearDown(self):
         self.root.destroy()

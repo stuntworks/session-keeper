@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Monitor names and wallpapers for the map, read locally, never saved | Full history: git log
+# Last modified: 2026-10-26 | Change: Light palette wallpapers stay inside their readable range too | Full history: git log
 """The map's real monitor names and dimmed wallpapers: readable, matched to the right monitor, never fatal."""
 
 import unittest
@@ -58,6 +58,23 @@ class DesktopLookTests(unittest.TestCase):
             self.assertEqual(picture.size, (320, 180))
             for channel, top in zip(picture.getextrema(), ceiling):
                 self.assertLessEqual(channel[1], top, tint)
+
+    def test_light_palette_wallpapers_stay_inside_the_readable_range(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        from keeper_palette import LIGHT
+        floor, ceiling = look.channels(LIGHT["WALL_FLOOR"]), look.channels(LIGHT["WALL_CEIL"])
+        with patch.multiple(look, WALL_FLOOR=LIGHT["WALL_FLOOR"], WALL_CEIL=LIGHT["WALL_CEIL"],
+                            WALL_SHADE=LIGHT["WALL_SHADE"]):
+            pictures = [look.tinted_desktop(tint, (320, 180)) for tint in LIGHT["TINTS"]]
+            pictures.append(look.dim_image(Image.new("RGB", (40, 20), "#000000")))
+            pictures.append(look.dim_image(Image.new("RGB", (40, 20), "#FFFFFF")))
+            for picture in pictures:
+                for (low, high), bottom, top in zip(picture.getextrema(), floor, ceiling):
+                    self.assertGreaterEqual(low, bottom)
+                    self.assertLessEqual(high, top)
 
     def test_saved_monitor_is_matched_by_where_it_sits(self):
         live = [{"rect": (0, 0, 3840, 2160), "name": "DELL U2720Q"}, {"rect": (3840, 0, 3840, 2160), "name": "LG"}]

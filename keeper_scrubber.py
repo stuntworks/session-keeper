@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Film-strip time scrubber over the Saved layout chooser entries | Full history: git log
+# Last modified: 2026-11-10 | Change: Short stop name for an old pre-crash layout | Full history: git log
 """The time scrubber. Its stops ARE the chooser entries (keeper_chooser.chooser_entries), oldest on the left.
 Picking a stop only asks the recovery window to show that saved layout; it never launches anything."""
 
@@ -13,7 +13,9 @@ SPLICE_AT = 0.3                    # reboot mark sits this far from the older st
 
 SHORT = ((r"^Latest\b", "Latest"), (r"^15 min ago", "15 min"), (r"^1 hour ago", "1 hr"),
          (r"^3 hours ago", "3 hr"), (r"^Before last reboot", "Before reboot"), (r"^Today\b", "Start of today"),
-         (r"^Yesterday\b", "Yesterday"), (r"^Old prototype", "Prototype"))
+         (r"^Yesterday\b", "Yesterday"), (r"^Old prototype", "Prototype"),
+         (r"^Before the crash", "Before crash"), (r"^Last layout before the crash", "Before crash (old)"),
+         (r"^Before many tabs closed", "Before close"))
 
 
 # WHAT IT DOES: Turns a chooser label into the few words shown under its stop.

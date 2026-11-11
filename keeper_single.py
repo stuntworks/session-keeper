@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: One recovery screen at a time; a second launch brings it to the front | Full history: git log
+# Last modified: 2026-11-10 | Change: A second launch also asks the open screen to reload its saved layouts | Full history: git log
 """Single instance for `keeper_app.py recover`. A Windows named mutex says whether a recovery screen
 is running (Windows frees it if that process crashes); a small file in data\\ says which window to raise.
 Separate from the "watch" and "restore" locks in keeper_locks, which are not touched."""
@@ -7,6 +7,8 @@ import ctypes
 import hashlib
 import json
 import os
+import subprocess
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -130,10 +132,37 @@ def claim_recover_screen(name=None, wait=WAIT_SECONDS, info=INFO):
         target = choose_target(read_info(info), pid_alive, window_pid)
         if target:
             bring_to_front(target)
+            request_reload(reload_path(info))   # the open screen may hold layouts read days ago
             return False
         if time.monotonic() >= deadline:
             return True
         time.sleep(0.25)
+
+
+# WHAT IT DOES: Where a second launch leaves its "please reload" note: beside the window record.
+# DEPENDS ON: The window record path (tests pass a temporary one, so the note lands there too).
+def reload_path(info=INFO):
+    return Path(info).with_name("recover_reload.json")
+
+
+# WHAT IT DOES: Leaves a fresh "please reload" note for the open recovery screen (keeper_reload watches it).
+# DEPENDS ON: A writable data folder. Written atomically; failures are ignored (the screen is still raised).
+# AFFECTS: data/recover_reload.json only.
+def request_reload(path):
+    try:
+        temporary = Path(path).with_suffix(".tmp")
+        temporary.write_text(json.dumps({"pid": os.getpid(), "at": time.time_ns()}), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+# WHAT IT DOES: The current "please reload" note as text, or None when there is none.
+def reload_note(path):
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 # WHAT IT DOES: Records which window a second launch should raise (the loading window, then the screen).
@@ -148,3 +177,33 @@ def publish_window(widget, path=INFO):
         os.replace(temporary, path)
     except (OSError, ValueError):
         pass
+
+
+# WHAT IT DOES: Lets go of the recovery-screen mutex this process holds, so a fresh copy can take it.
+# DEPENDS ON: _held (filled by claim_recover_screen); nothing held is a no-op.
+# AFFECTS: The next `keeper_app.py recover` launch owns the screen instead of raising this window.
+def release_screen():
+    while _held:
+        release(_held.pop())
+
+
+# WHAT IT DOES: Starts this recovery screen again as a new process with the same Python and the same
+# arguments (so the new one reads the saved colours), after giving up the screen lock. The caller then
+# closes its own window.
+# DEPENDS ON: Only ever called from `keeper_app.py recover`: that mode never records and never restores on
+# its own (restores need a click), and the watch/restore locks in keeper_locks are not involved.
+# AFFECTS: One new Session Keeper recovery window; popen is injectable for tests.
+def relaunch_recover_screen(popen=None, argv=None):
+    argv = list(sys.argv if argv is None else argv)
+    if len(argv) < 2 or argv[1] != "recover":
+        raise RuntimeError("Only the recovery screen can be reopened")
+    release_screen()
+    command = [sys.executable, os.path.abspath(argv[0])] + argv[1:]
+    try:
+        (popen or subprocess.Popen)(command, cwd=os.getcwd(), close_fds=True,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except OSError:
+        handle = try_own(screen_lock_name())   # could not start: keep being the one recovery screen
+        if handle:
+            _held.append(handle)
+        raise

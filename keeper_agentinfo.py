@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: New read-only transcript facts (last message, times, size, file-change and command counts) | Full history: git log
+# Last modified: 2026-10-22 | Change: Recent replies and changed-file list for the All sessions review | Full history: git log
 """Pure, read-only facts about one saved Claude Code / Codex session, measured from its transcript.
 
 Nothing here guesses or labels. Every number is a count of entries actually present in the transcript
@@ -23,6 +23,7 @@ FRACTION = re.compile(r"(\.\d{6})\d+")
 PATCH_HEADER = re.compile(r"^\*\*\* (?:Update File|Add File|Delete File|Move to): (.+)$")
 JS_ESCAPE = re.compile(r"\\(.)", re.S)
 LAST_TEXT_LIMIT = 400
+RECENT_REPLIES, RECENT_FILES_LIMIT = 5, 30     # "What it worked on" in the review panel
 
 CLAUDE_EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CLAUDE_SHELL_TOOLS = {"Bash", "PowerShell"}
@@ -64,7 +65,8 @@ def find_transcript(kind, session_id, cwd, claude_root=None, codex_root=None):
 # WHAT IT DOES: Measures one saved session from its transcript. Returns {"available": False, "reason"} or
 # {"available": True, path, title, last_text, last_text_time, started, last_active, active_span (seconds),
 #  user_prompts, assistant_replies, messages, transcript_bytes, file_changes, files_changed, commands,
-#  skipped_lines}. Times are local-timezone datetimes.
+#  skipped_lines, recent_replies [(time, final paragraph)] newest first, recent_files [path] newest first}.
+#  Times are local-timezone datetimes.
 # DEPENDS ON: row["session_id"], row["kind"] ("claude"/"codex"), row["cwd"]; the transcript on disk.
 # AFFECTS: Read-only. Cached by (path, size, mtime) so an unchanged file is never read twice.
 def agent_facts(row, claude_root=None, codex_root=None, codex_index=None):
@@ -73,7 +75,9 @@ def agent_facts(row, claude_root=None, codex_root=None, codex_index=None):
         return {"available": False, "reason": "Not a Claude or Codex session"}
     if not SESSION_ID.fullmatch(session_id):
         return {"available": False, "reason": "No exact session ID saved for this tab"}
-    path = find_transcript(kind, session_id, row.get("cwd"), claude_root, codex_root)
+    known = Path(row["path"]) if row.get("path") else None       # All sessions already knows the file
+    path = known if known and known.is_file() else find_transcript(kind, session_id, row.get("cwd"), claude_root,
+                                                                    codex_root)
     if path is None:
         return {"available": False, "reason": "Transcript not found on this computer"}
     try:
@@ -107,13 +111,33 @@ def finish(scan, path, size):
             "assistant_replies": len(scan["replies"]),
             "messages": scan["user_prompts"] + len(scan["replies"]), "transcript_bytes": size,
             "file_changes": scan["file_changes"], "files_changed": len(scan["files"]),
-            "commands": scan["commands"], "skipped_lines": scan["skipped"]}
+            "commands": scan["commands"], "skipped_lines": scan["skipped"],
+            "recent_replies": [(moment, trim_text(final_paragraph(text))) for _, moment, text in reversed(scan["recent"])],
+            "recent_files": [name for _, name in sorted(scan["order"].values(), reverse=True)[:RECENT_FILES_LIMIT]]}
 
 
 def new_scan():
     return {"started": None, "last_active": None, "last_text": None, "last_text_time": None,
             "user_prompts": 0, "replies": set(), "file_changes": 0, "files": set(), "commands": 0,
-            "skipped": 0, "title": None}
+            "skipped": 0, "title": None, "recent": [], "order": {}, "seq": 0}
+
+
+# WHAT IT DOES: Remembers one assistant reply for "What it worked on"; a message split over several lines
+# (same id) counts once, with its latest text. Keeps only the last RECENT_REPLIES.
+def note_reply(scan, reply_id, moment, text):
+    if scan["recent"] and scan["recent"][-1][0] == reply_id:
+        scan["recent"][-1] = (reply_id, moment, text)
+    else:
+        scan["recent"] = (scan["recent"] + [(reply_id, moment, text)])[-RECENT_REPLIES:]
+
+
+# WHAT IT DOES: Records a changed file (counted once, case-insensitive) and when it was last changed.
+def note_file(scan, name):
+    name = str(name).strip()
+    key = os.path.normcase(name)
+    scan["files"].add(key)
+    scan["seq"] += 1
+    scan["order"][key] = (scan["seq"], name)
 
 
 # WHAT IT DOES: Converts an ISO timestamp from a transcript to local time, or None.
@@ -197,6 +221,7 @@ def claude_assistant(entry, scan, tool_ids):
             if text and not entry.get("isApiErrorMessage") and message.get("model") != "<synthetic>":
                 scan["replies"].add(message.get("id") or entry.get("uuid"))
                 scan["last_text"], scan["last_text_time"] = text, parse_time(entry.get("timestamp"))
+                note_reply(scan, message.get("id") or entry.get("uuid"), scan["last_text_time"], text)
         elif block.get("type") == "tool_use":
             tool_id = block.get("id")
             if tool_id in tool_ids:
@@ -208,7 +233,7 @@ def claude_assistant(entry, scan, tool_ids):
                 scan["file_changes"] += 1
                 target = tool_input.get("file_path") or tool_input.get("notebook_path")
                 if target:
-                    scan["files"].add(os.path.normcase(str(target).strip()))
+                    note_file(scan, target)
             elif name in CLAUDE_SHELL_TOOLS:
                 scan["commands"] += 1
 
@@ -259,6 +284,7 @@ def codex_message(entry, payload, scan):
     elif payload.get("role") == "assistant" and text:
         scan["replies"].add(payload.get("id") or entry.get("timestamp"))
         scan["last_text"], scan["last_text_time"] = text, parse_time(entry.get("timestamp"))
+        note_reply(scan, payload.get("id") or entry.get("timestamp"), scan["last_text_time"], text)
 
 
 def codex_tool(payload, scan):
@@ -269,7 +295,8 @@ def codex_tool(payload, scan):
     # DANGER ZONE FRAGILE: Code-mode "exec" scripts call tools inside JavaScript / breaks: work counts /
     # depends on: tools.apply_patch / tools.exec_command spellings in the script text.
     scan["file_changes"] += max(patches, 1 if name == "apply_patch" else 0)
-    scan["files"].update(patch_files(body))
+    for changed in patch_paths(body):
+        note_file(scan, changed)
     if payload.get("type") == "local_shell_call" or name in CODEX_SHELL_TOOLS:
         scan["commands"] += 1
     elif name == "exec":
@@ -280,7 +307,12 @@ def codex_tool(payload, scan):
 # DEPENDS ON: "*** Begin Patch" / "*** Update|Add|Delete File: <path>" headers, raw or JS-string-escaped.
 # AFFECTS: Nothing.
 def patch_files(body):
-    files, start = set(), body.find("*** Begin Patch")
+    return {os.path.normcase(name) for name in patch_paths(body)}
+
+
+# WHAT IT DOES: The same paths as written, in patch order (for the review's changed-files list).
+def patch_paths(body):
+    files, start = [], body.find("*** Begin Patch")
     while start != -1:
         end = body.find("*** End Patch", start)
         segment = body[start:end if end != -1 else len(body)]
@@ -289,7 +321,7 @@ def patch_files(body):
         for line in segment.splitlines():
             header = PATCH_HEADER.match(line.strip())
             if header:
-                files.add(os.path.normcase(header.group(1).strip()))
+                files.append(header.group(1).strip())
         start = body.find("*** Begin Patch", start + 1)
     return files
 

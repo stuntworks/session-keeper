@@ -1,4 +1,4 @@
-# Last modified: 2026-10-19 | Change: Short snapshot chooser built from history checkpoints | Full history: git log
+# Last modified: 2026-11-10 | Change: "Before the crash" entry (keeper_crash), placed first so it wins over Latest when they are the same layout | Full history: git log
 """Turns thousands of saved snapshots into a short list of meaningful moments. Read-only (thinning lives in keeper_prune)."""
 
 from datetime import datetime, timedelta
@@ -26,9 +26,11 @@ def clock(moment):
 
 
 # WHAT IT DOES: Builds the chooser entries, newest first: Latest, Before last reboot, recent checkpoints, days.
-# DEPENDS ON: History sorted newest first, as read_history returns it.
-# AFFECTS: Returns (label, history_index) pairs; each saved snapshot appears at most once.
-def chooser_entries(history, now=None):
+# DEPENDS ON: History sorted newest first, as read_history returns it. crash: keeper_crash.crash_facts' "crash"
+# (None: no crash entry, exactly as before).
+# AFFECTS: Returns (label, history_index) pairs; each saved snapshot appears at most once. The crash entry is
+# added first, so when the newest layout IS the one before the crash it is labelled "Before the crash".
+def chooser_entries(history, now=None, crash=None):
     if not history:
         return []
     now = (now or datetime.now()).astimezone()
@@ -41,8 +43,13 @@ def chooser_entries(history, now=None):
 
     normal = [(index, captured(snap)) for index, (_, snap) in enumerate(history) if not snap.get("legacy")]
     normal = [(index, moment) for index, moment in normal if moment]
+    if crash and crash.get("index") is not None and 0 <= crash["index"] < len(history):
+        from keeper_crash import crash_label
+        add(crash_label(crash, now), crash["index"])
     first_time = captured(history[0][1])
-    add("Latest" + (f" ({clock(first_time)})" if first_time else ""), 0)
+    # An old newest layout must look old: "Latest (Oct 29, 2:44 PM)", not "Latest (2:44 PM)".
+    day = "" if not first_time or first_time.date() == now.date() else f"{first_time:%b} {first_time.day}, "
+    add("Latest" + (f" ({day}{clock(first_time)})" if first_time else ""), 0)
     newest_boot = history[0][1].get("boot_id")
     before = next((index for index, _ in normal if history[index][1].get("boot_id") != newest_boot), None)
     if before is not None:

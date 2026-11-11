@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: An unidentified Claude always stops a clicked restore | Full history: git log
+# Last modified: 2026-11-10 | Change: Slow/late windows waited for and adopted; one hiccup costs one tab or group; maximised windows; a finished real restore is noted | Full history: git log
 """Launch selected absent CLI sessions and position only their verified new windows."""
 
 import os
@@ -6,16 +6,23 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from keeper_locks import exclusive_operation
-from keeper_display import read_monitors
+from keeper_locks import exclusive_operation, wait_out_capture
+from keeper_display import monitors_settled, read_monitors
+from keeper_coords import physical_snapshot
 
 from keeper_core import (ROOT, plan_restore, read_boot_id,
                          read_windows, strip_leading_glyphs)
 from keeper_created import group_key, load_created_windows, record_created_window
+from keeper_crash_record import note_restore_done
+import keeper_newwindow
+from keeper_newwindow import (WindowNotSeen, adopt_late_windows, find_new_window, not_maximised,
+                             record_pending, still_starting)
 
 PLACE_SCRIPT = ROOT / "place_window.ps1"
 STRICT_WAIT_SECONDS = 30
 STRICT_POLL_SECONDS = 2.5
+MONITOR_RETRIES = 2            # a monitor read that differs is re-read this many times before a group is skipped
+MONITOR_RETRY_SECONDS = 2
 
 
 # WHAT IT DOES: Removes inherited child markers and no-color flags for interactive recovery.
@@ -109,39 +116,25 @@ def live_session_ids(strict=False):
     return {session["sessionId"] for session in sessions if session.get("sessionId")}
 
 
-# WHAT IT DOES: Waits for exactly one new Windows Terminal handle after launch.
-# DEPENDS ON: UI Automation being able to see the launched window.
-# AFFECTS: Refuses placement if another terminal appears at the same time.
-def find_new_window(previous_handles, expected_title, timeout_seconds=15):
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        new_windows = [window for window in read_windows()
-                       if window.get("hwnd") not in previous_handles]
-        if len(new_windows) == 1 and expected_title.casefold() in strip_leading_glyphs(
-                new_windows[0].get("title") or "").casefold():
-            return new_windows[0]
-        if len(new_windows) > 1:
-            raise RuntimeError("another terminal window opened at the same moment, so Session Keeper did not move "
-                               "either one. To fix: close the extra new window, then press Restart selected again")
-        time.sleep(0.5)
-    raise RuntimeError("its new terminal window did not appear within 15 seconds. To fix: check whether Windows "
-                       "Terminal opened it somewhere else; if not, press Restart selected again")
-
-
 # WHAT IT DOES: Moves one verified new window to the recorded rectangle.
 # DEPENDS ON: place_window.ps1 and a handle never present before launch.
 # AFFECTS: A bad handle could move an existing terminal, so identity is checked twice.
-def place_new_window(handle, rectangle, previous_handles):
+# maximize=True (only for a window saved maximised): placed at its normal spot first, then maximised there.
+# Returns True; False when the window was placed correctly but did not maximise (place_window.ps1 exit 3).
+def place_new_window(handle, rectangle, previous_handles, maximize=False):
     if handle in previous_handles:
         raise RuntimeError("Refusing to move a pre-existing terminal")
     arguments = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                  str(PLACE_SCRIPT), "-Handle", str(handle), "-X", str(rectangle["x"]),
                  "-Y", str(rectangle["y"]), "-Width", str(rectangle["w"]),
-                 "-Height", str(rectangle["h"])]
+                 "-Height", str(rectangle["h"])] + (["-Maximize"] if maximize else [])
     result = subprocess.run(arguments, capture_output=True, text=True, timeout=20,
                             creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode == 3 and maximize:
+        return False                    # placed and checked; only the maximise did not take
     if result.returncode:
         raise RuntimeError(f"Could not position new terminal: {result.stderr.strip()}")
+    return True
 
 
 # WHAT IT DOES: Returns the exact CLI words that resume one saved conversation.
@@ -213,7 +206,7 @@ def read_live_groups(windows):
 # DEPENDS ON: The same planner as restore, plus read-only process and window scans. lock_name selects the Windows lock.
 # AFFECTS: Nothing is opened or closed; the result feeds the confirm dialog. The default lock is the real per-user restore lock.
 def assess_restore(snapshot, selected_keys, override=False, *, lock_name="restore"):
-    with exclusive_operation(lock_name):
+    with wait_out_capture(lock_name, lock=exclusive_operation):   # a capture finishes; another restore fails
         return find_blocked(snapshot, selected_keys, check=live_check(snapshot, selected_keys, True, override))
 
 
@@ -226,7 +219,9 @@ def find_blocked(snapshot, selected_keys, live_ids=None, windows=None, check=Tru
     live_ids = live_session_ids(strict=check) if live_ids is None else live_ids
     blocked = []
     groups = LazyReader(lambda: read_live_groups(windows))
-    plan_restore(snapshot, selected_keys, live_ids, windows, read_monitors(),
+    monitors = read_monitors()
+    snapshot = physical_snapshot(snapshot, monitors)[0]
+    plan_restore(snapshot, selected_keys, live_ids, windows, monitors,
                  load_created_windows(read_boot_id()), live_groups=groups.get, blocked=blocked)
     if blocked:
         classify_blocked(blocked, groups.get(), read_shells())
@@ -273,9 +268,15 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
                     override=False):
     check = live_check(snapshot, selected_keys, manual, override)
     monitors = read_monitors()
+    snapshot, coord_warnings = physical_snapshot(snapshot, monitors)   # older snapshots: system-DPI spots
     boot_id = read_boot_id()
     owned = load_created_windows(boot_id)
     blocked = []
+    late = [] if dry_run else adopt_late(owned, boot_id)    # a window that opened after its group gave up
+    # DANGER ZONE HIGH: A chat whose window is still starting is not live yet / breaks: a second copy of that
+    # chat / depends on: still_starting holding back its whole saved window for PENDING_MINUTES.
+    selected_keys, starting = still_starting(snapshot, selected_keys, boot_id)
+    late += starting
     try:
         windows = read_windows()
         live = live_session_ids(strict=check)
@@ -286,6 +287,7 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
         raise  # the screen shows the fix-it text and the explicit "Restore anyway" button
     except RuntimeError as error:
         return [], [f"Recovery paused: {error}. To fix: press Restart selected again in a moment."]
+    warnings = coord_warnings + late + warnings
     # Back windows first, front window last: each new window opens on top, so a window that was hidden
     # behind another ends up behind it again. Only the order changes; the plans themselves do not.
     from keeper_zorder import back_to_front
@@ -297,13 +299,13 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
         except RuntimeError as error:
             warnings.append(f"Could not check the windows on the saved spots: {error}. To fix: press Preview again.")
     restored = []
-    state = {"adds_stopped": False}
+    state = {"adds_stopped": False, "pending": False, "monitors_changed": False}
     for plan in plans:
         rows = plan["tabs"]
-        if read_monitors() != monitors:
-            warnings.append("Stopped: the monitor layout changed during recovery. To fix: wait until every display "
-                            "is on and settled, then press Restart selected again.")
-            break
+        if not monitors_settled(monitors, state, read_monitors, time.sleep, MONITOR_RETRIES, MONITOR_RETRY_SECONDS):
+            warnings.append(f"Not opened: '{rows[0]['title']}'. The monitor layout changed during recovery. To fix: "
+                            "wait until every display is on and settled, then press Restart selected again.")
+            continue
         if plan.get("close_hwnds"):
             if dry_run:
                 restored.extend(f"Would close the empty terminal and open in its place: {row['title']}" for row in rows)
@@ -316,7 +318,7 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
             fresh_plans, fresh_warnings = plan_restore(snapshot, {row["key"] for row in rows},
                 live_session_ids(strict=check), windows, monitors, owned,
                 live_groups=groups.get, choices=choices)
-        except RuntimeError as error:
+        except Exception as error:      # a probe hiccup (or an unidentified CLI) costs this group only
             warnings.append(stop_line(rows[0]["title"], error))
             continue
         warnings.extend(fresh_warnings)
@@ -336,11 +338,26 @@ def perform_restore(snapshot, selected_keys, dry_run=False, choices=None, approv
             restored.extend(prefix + row["title"] for row in fresh["tabs"])
             continue
         before = len(restored)
-        open_group(snapshot, fresh, owned, boot_id, restored, warnings, check)
+        state["pending"] |= open_group(snapshot, fresh, owned, boot_id, restored, warnings, check)
         if fresh.get("on_top") and len(restored) > before:
             warnings.append(f"Opened '{fresh['tabs'][0]['title']}' on top of {fresh['covering']} at its saved spot; "
                             "drag it where you want. Nothing was closed.")
+    if state["pending"]:
+        warnings.extend(adopt_late(owned, boot_id))   # a slow window may have turned up while later groups ran
     return restored, warnings
+
+
+# WHAT IT DOES: Adopts provably-ours late windows (keeper_newwindow); returns its plain lines. Never raises.
+# DEPENDS ON: read_windows, read_live_groups, place_new_window (looked up here so tests can fake them).
+# AFFECTS: owned gains each adopted window; that window is moved to its saved spot.
+def adopt_late(owned, boot_id):
+    lines = []
+    try:
+        adopt_late_windows(owned, boot_id, read_windows, read_live_groups, place_new_window, lines)
+    except Exception as error:
+        lines.append(f"Could not check for a terminal window that opened late: {error}. Nothing to fix.")
+    return lines
+
 
 
 # WHAT IT DOES: Chooses the live check. Login auto-restore and a clicked restore both stop on every
@@ -392,7 +409,8 @@ def free_spot(plan, approved_close, warnings, check=True):
 
 # WHAT IT DOES: Adds each missing tab into its group's open window, verifying every landing.
 # DEPENDS ON: keeper_target.add_tab and strict live checks before each launch.
-# AFFECTS: A missed landing stops all further adds to open windows for this run.
+# AFFECTS: A missed or unproven landing (any error after the tab was launched) stops all further adds to open
+# windows for this run. A failed identity check stops this window. An error before launch costs only that tab.
 def add_to_open_window(plan, dry_run, restored, warnings, state, check=True):
     import keeper_target
     for row in plan["tabs"]:
@@ -404,18 +422,32 @@ def add_to_open_window(plan, dry_run, restored, warnings, state, check=True):
                             "To fix: check that window, then press Restart selected again.")
             continue
         try:
+            # DANGER ZONE HIGH: Identity failure stops this window / breaks: a chat opened twice / depends on: break.
             if row["session_id"] in live_session_ids(strict=check):
                 warnings.append(f"Not opened twice: '{row['title']}' is already open. Nothing to fix.")
                 continue
+        except Exception as error:
+            warnings.append(stop_line(row["title"], error))
+            break
+        launched = []
+
+        # WHAT IT DOES: launch_tab, noting that this tab really was launched. AFFECTS: launched only.
+        def launch(name, launch_row):
+            launched.append(launch_row["session_id"])
+            launch_tab(name, launch_row)
+        try:
             verified = keeper_target.add_tab(plan["target_hwnd"], row, plan.get("window_name"),
-                                             launch_tab, wait_for_session, read_windows)
+                                             launch, wait_for_session, read_windows)
         except keeper_target.TargetMissed as error:
             state["adds_stopped"] = True
             warnings.append(str(error))
             continue
         except Exception as error:
+            # DANGER ZONE HIGH: Launched but landing unproven stops all adds / breaks: next `wt -w 0` lands in
+            # the wrong window / depends on: launched being set by the launch wrapper.
+            state["adds_stopped"] |= bool(launched)
             warnings.append(stop_line(row["title"], error))
-            break
+            continue
         if verified:
             restored.append(row["title"])
         else:
@@ -424,32 +456,44 @@ def add_to_open_window(plan, dry_run, restored, warnings, state, check=True):
 
 # WHAT IT DOES: Opens one group in a new (or Session Keeper-owned) window at its saved spot.
 # DEPENDS ON: Launch, new-window detection, placement, and strict live checks.
-# AFFECTS: Starts processes and moves only the window this run created.
+# AFFECTS: Starts processes and moves only the window this run created. Returns True when a launched window
+# did not show up in time and was recorded as pending (keeper_newwindow adopts it if it turns up later).
 def open_group(snapshot, plan, owned, boot_id, restored, warnings, check=True):
     rows = plan["tabs"]
     existing_window = plan.get("window_name")
-    previous_handles = {window.get("hwnd") for window in read_windows()}
     window_name = existing_window or "SessionKeeper-" + uuid.uuid4().hex
     first = rows[0]
+    maximize = bool(first["window"].get("maximized"))
     if not existing_window:
+        launched = False
         try:
+            previous_handles = {window.get("hwnd") for window in read_windows()}
+            baseline = keeper_newwindow.terminal_handles()      # same lister the wait polls with
             launch_tab(window_name, first)
+            launched = True
             expected = first["title"][:70].replace(';', ',').replace('\n', ' ').replace('\r', ' ') or "Recovered session"
-            new_window = find_new_window(previous_handles, expected)
+            new_window = find_new_window(previous_handles, expected, read_windows, baseline=baseline,
+                                         session_id=first["session_id"], groups=read_live_groups)
+            launched = False
             try:
-                record_created_window(window_name, new_window["hwnd"], group_key(snapshot, first["window_index"]), boot_id)
+                record_created_window(window_name, new_window["hwnd"], group_key(snapshot, first["window_index"]), boot_id,
+                                      rect=plan["rect"], converted_from=first["window"].get("converted_from"))
                 owned.append({"window_name": window_name, "hwnd": new_window["hwnd"],
                               "group": group_key(snapshot, first["window_index"]), "boot_id": boot_id})
             except OSError as error:
                 warnings.append(f"Could not record the new window, so it cannot be refilled later: {error}")
-            place_new_window(new_window["hwnd"], plan["rect"], previous_handles)
+            if place_new_window(new_window["hwnd"], plan["rect"], previous_handles, maximize=maximize) is False:
+                warnings.append(not_maximised(first["title"]))
             if wait_for_session(first["session_id"]):
                 restored.append(first["title"])
             else:
                 warnings.append(unverified_line(first["title"]))
         except Exception as error:
-            warnings.append(stop_line(first["title"], error))
-            return
+            text = f"Not opened yet: '{first['title']}': {error}." if isinstance(error, WindowNotSeen) else None
+            warnings.append(text or stop_line(first["title"], error))
+            return launched and record_pending(window_name, snapshot, first["window"], first["window_index"],
+                                               first["session_id"], first["title"], plan["rect"], previous_handles,
+                                               boot_id, maximize)
     for row in (rows if existing_window else rows[1:]):
         try:
             if row["session_id"] in live_session_ids(strict=check):
@@ -467,12 +511,18 @@ def open_group(snapshot, plan, owned, boot_id, restored, warnings, check=True):
             time.sleep(1.5)
         except Exception as error:
             warnings.append(stop_line(row["title"], error))
+    return False
 
 
 # WHAT IT DOES: Runs one restore at a time across every open Session Keeper screen.
 # DEPENDS ON: Windows operation lock and the guarded restore implementation. lock_name selects that lock.
 # AFFECTS: Concurrent clicks cannot duplicate a conversation. The default lock is the real per-user restore lock.
+# A real (not preview) restore that opened at least one chat is noted in data\restore_done.json; a paused
+# or empty one is not, so the screen still preselects "Before the crash".
 def restore_selected(snapshot, selected_keys, dry_run=False, choices=None, approved_close=(), manual=False,
                      override=False, *, lock_name="restore"):
-    with exclusive_operation(lock_name):
-        return perform_restore(snapshot, selected_keys, dry_run, choices, approved_close, manual, override)
+    with wait_out_capture(lock_name, lock=exclusive_operation):   # a capture finishes; another restore fails
+        result = perform_restore(snapshot, selected_keys, dry_run, choices, approved_close, manual, override)
+    if not dry_run and result[0]:
+        note_restore_done()         # the screen stops opening on "Before the crash" (keeper_crash_record)
+    return result

@@ -1,11 +1,10 @@
-# Last modified: 2026-11-03 | Change: UI error and freeze logs switched on for recover and watch (keeper_uiguard) | Full history: git log
+# Last modified: 2026-11-10 | Change: Recorder saves the crash record soon after a sharp drop (keeper_prune.after_capture) | Full history: git log
 """Session Keeper: record terminal groups and offer a safe recovery menu."""
 
 import argparse
 import threading
 from keeper_coexist import wait_for_native_restore
 import sys
-from datetime import datetime
 import tkinter as tk
 from pathlib import Path
 
@@ -14,10 +13,11 @@ from keeper_core import (DATA, capture_snapshot,
 from keeper_restore import UnidentifiedSessions, assess_restore, live_session_ids, restore_selected
 from keeper_restore import open_second_copy as launch_second_copy
 from keeper_chooser import chooser_entries
+from keeper_crash import read_crash_times, shown_layout, start_index
 from keeper_scrubber import scrubber_stops
 from keeper_chrome import SAVED
 from keeper_recovery_view import RecoveryScreen
-from keeper_theme import GO, IC_CHECK, ROOM, STOP, Theme
+from keeper_theme import GO_TEXT, IC_CHECK, ROOM, STOP, Theme
 from keeper_ask import OccupiedDialog, all_empty
 from keeper_copycmd import build_resume_text
 from keeper_display import big_geometry, make_dpi_aware, pointer_monitor, read_monitors
@@ -25,16 +25,22 @@ from keeper_settings import auto_restore_enabled
 from keeper_fast_history import fast_history, newest_snapshot
 from keeper_history import startup_recovery
 from keeper_background import run_background
-from keeper_locks import exclusive_operation
-from keeper_prune import prune_if_due, report_text, run_prune
+from keeper_locks import capture_mark, exclusive_operation
+from keeper_prune import after_capture, report_text, run_prune
 from configure_terminal import terminal_restore_enabled
 from keeper_live_view import LiveChatsPanel
 from keeper_loading import LoadingWindow, load_then_show
-from keeper_single import claim_recover_screen, publish_window
+from keeper_single import claim_recover_screen, publish_window, reload_path
 from keeper_start import load_recovery_start
 from keeper_uiguard import install as install_ui_guard
+import keeper_watchdog
+import keeper_heartbeat
+from keeper_recorder_health import show_recorder_health
+from keeper_reload import ReloadWatch, screen_busy
 
 INTERVAL_MS = 120_000
+SKIP_MS = 10_000            # while the login view is busy, look again this soon (not a capture)
+MAX_SKIPS = 180             # ...but never skip for more than 30 minutes in a row (a window left mid-countdown)
 
 
 # WHAT IT DOES: Loads the newest usable snapshot, preferring the previous boot.
@@ -51,8 +57,8 @@ class RecoveryWindow(RecoveryScreen):
     # WHAT IT DOES: Builds the screen once (it always opens on Saved recovery); a stop only refreshes the map.
     # DEPENDS ON: Tk root, snapshot data, live process inventory.
     # AFFECTS: The restore button acts only on selected tabs.
-    def __init__(self, root, path, snapshot, watch_mode=False, history=None, live=None):
-        self.root = root
+    def __init__(self, root, path, snapshot, watch_mode=False, history=None, live=None, extras=None):
+        self.root, self.extras = root, extras       # extras: keeper_crash.crash_facts (None: no crash facts)
         self.options = {}
         self.watch_mode = watch_mode
         self.countdown_job = None
@@ -67,7 +73,7 @@ class RecoveryWindow(RecoveryScreen):
         self.theme.style_ttk()
         self.root.configure(background=ROOM)
         self.history = history if history is not None else fast_history()
-        self.entries = chooser_entries(self.history)
+        self.entries = chooser_entries(self.history, crash=(extras or {}).get("crash"))
         self.stops = scrubber_stops(self.history, self.entries) if self.history else []
         self.auto_restore_default = auto_restore_enabled
         self.build_screen()
@@ -84,10 +90,12 @@ class RecoveryWindow(RecoveryScreen):
     # WHAT IT DOES: Shows one saved layout on the map, keeping the user on the Saved recovery tab.
     # DEPENDS ON: recovery_rows and a fresh live ID set (passed in when it was read off the Tk thread).
     # AFFECTS: Rebuilds the selection; in watch mode every missing tab starts selected for the countdown.
+    # The shown copy (keeper_crash.shown_layout) adds the died-in-crash window; the saved file is never changed.
     def load(self, path, snapshot, live=None):
+        self.live = live if live is not None else live_session_ids()
+        snapshot = shown_layout(snapshot, self.extras, self.live)
         self.path, self.snapshot = path, snapshot
         self.rows = {row["key"]: row for row in recovery_rows(snapshot)}
-        self.live = live if live is not None else live_session_ids()
         self.options = {key: tk.BooleanVar(value=self.watch_mode and row["session_id"] not in self.live)
                         for key, row in self.rows.items()}
         unmatched = snapshot.get("unmatched_sessions", [])
@@ -122,7 +130,7 @@ class RecoveryWindow(RecoveryScreen):
         self.root.clipboard_append(text)
         self.root.update()
         name = rows[0]["title"] if len(rows) == 1 else f"{len(rows)} tabs"
-        self.copy_status.configure(text=f"Copied command for {name}", foreground=GO)
+        self.copy_status.configure(text=f"Copied command for {name}", foreground=GO_TEXT)
         self.copy_button.configure(text="Copied", icon=IC_CHECK)
 
     # WHAT IT DOES: Gives native restore time to finish while keeping STOP responsive.
@@ -432,19 +440,22 @@ def window_geometry():
 # AFFECTS: Adds history files without replacing earlier snapshots.
 def snapshot_once():
     with exclusive_operation("restore"):
-        snapshot = capture_snapshot()
-        if snapshot["counts"]["matched"]:
+        skipped = []                    # processes that could not be read (each is left out, not fatal)
+        snapshot = capture_snapshot(skipped)
+        if keeper_heartbeat.review_capture(snapshot, skipped):   # logs skips and match trouble on change
             return save_snapshot(snapshot)
     return None
 
 
-# WHAT IT DOES: Takes one snapshot; after a successful one, thins old snapshots if an hour has passed.
-# DEPENDS ON: snapshot_once; keeper_prune.prune_if_due (takes the restore lock itself, never raises).
+# WHAT IT DOES: Takes one snapshot; after a successful one, thins old snapshots if an hour has passed and,
+# after a sharp drop, saves the crash record soon. DEPENDS ON: snapshot_once; keeper_prune.after_capture.
 # AFFECTS: The background recorder's work on its worker thread; returns the new snapshot path or None.
+# The capture mark tells a restore that finds the "restore" lock taken to wait for us (keeper_locks).
 def record_once():
-    path = snapshot_once()
-    if path:
-        prune_if_due()
+    with capture_mark("restore"):
+        path = snapshot_once()
+        if path:
+            after_capture(read_crashes=read_crash_times)    # never raises
     return path
 
 
@@ -453,24 +464,49 @@ def record_once():
 # AFFECTS: apply=False is read-only.
 def run_prune_command(apply, force=False):
     if not apply:
-        print(report_text(run_prune()))
+        print(report_text(run_prune(crash_times=read_crash_times() or ())))
         return
     try:
         with exclusive_operation("restore"):
-            report = run_prune(apply=True, force=force)
+            report = run_prune(apply=True, force=force, crash_times=read_crash_times() or ())
     except RuntimeError as error:
         print(f"Not pruned: {error}. Try again when the restore has finished.")
         return
     print(report_text(report))
 
 
+# WHAT IT DOES: The login recovery window (watch mode) if one exists on this root, else None.
+def login_view(root):
+    view = getattr(root, "_keeper_window", None)
+    return view if isinstance(view, RecoveryWindow) and view.watch_mode else None
+
+
+# WHAT IT DOES: True while the login recovery window is on screen (shown or minimised, not hidden).
+def login_view_open(root):
+    try:
+        return login_view(root) is not None and root.state() != "withdrawn"
+    except tk.TclError:
+        return False
+
+
 # WHAT IT DOES: Keeps taking snapshots while Windows is running.
 # DEPENDS ON: Tk event loop and record_once.
-# AFFECTS: Future crashes can use the latest captured layout.
+# AFFECTS: Future crashes can use the latest captured layout. Every tick (skipped or not) tells the watchdog
+# the loop is alive.
+# DANGER ZONE HIGH: Never stop capturing because the login recovery window is open / breaks: recording
+# stopped for good while that window sat open or minimised / depends on: skips only while that window is
+# busy (countdown, restore, terminal wait, layout pick) and at most MAX_SKIPS in a row.
 def watch(root):
-    if root.state() != "withdrawn":
-        root.after(INTERVAL_MS, lambda: watch(root))
+    keeper_watchdog.tick()
+    view = login_view(root)
+    skips = getattr(root, "_keeper_skips", 0)
+    if view is not None and screen_busy(view) and skips < MAX_SKIPS:
+        root._keeper_skips = skips + 1      # a capture now could hold the lock the auto-restore is about to take
+        root.after(SKIP_MS, lambda: watch(root))
         return
+    root._keeper_skips = 0
+    keeper_heartbeat.login_window(login_view_open(root))
+    keeper_watchdog.capture_started()   # a capture that never reports back gets the recorder restarted
     run_background(root, record_once, lambda path: snapshot_finished(root, path),
                    lambda error: snapshot_failed(root, error))
 
@@ -482,17 +518,20 @@ def watch(root):
 # a closed tab and a crashed tab being indistinguishable mid-session. Recovery is offered after a
 # Start menu -> Session Keeper only, never because a conversation disappeared.
 def snapshot_finished(root, path):
+    keeper_watchdog.capture_done()
     root.after(INTERVAL_MS, lambda: watch(root))
+    keeper_heartbeat.capture_saved(path)    # heartbeat for the recovery screen; never raises
 
 
-# WHAT IT DOES: Records a watcher error and schedules the next read without discarding history.
+# WHAT IT DOES: Schedules the next read, then records the watcher error (log and heartbeat).
 # DEPENDS ON: Append-only diagnostic log in the app's data folder.
 # AFFECTS: Background errors remain visible after a hidden Python launch.
+# DANGER ZONE HIGH: Schedule BEFORE logging / breaks: a failed log write ended the capture chain for good /
+# depends on: keeper_heartbeat.capture_failed never raising.
 def snapshot_failed(root, error):
-    DATA.mkdir(parents=True, exist_ok=True)
-    with (DATA / "watcher_errors.log").open("a", encoding="utf-8") as file:
-        file.write(f"{datetime.now().isoformat()} {error}\n")
+    keeper_watchdog.capture_done()
     root.after(INTERVAL_MS, lambda: watch(root))
+    keeper_heartbeat.capture_failed(DATA, error)
 
 
 # WHAT IT DOES: Starts a one-time snapshot, background watcher, or recovery menu.
@@ -502,6 +541,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("snapshot", "watch", "recover", "prune"))
     parser.add_argument("--apply", action="store_true", help="prune: really delete (default is a dry run)")
+    parser.add_argument("--handover", action="store_true", help=argparse.SUPPRESS)  # watch: started by the watchdog
+    # watch: a restarted or screen-started recorder; only the real login launch may show the login window
+    parser.add_argument("--no-login-window", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="prune --apply: delete even when the PC clock looks wrong")
     arguments = parser.parse_args()
     if arguments.mode == "prune":
@@ -518,16 +560,27 @@ def main():
     root.withdraw()
     install_ui_guard(root, DATA)    # Tk errors and freezes are written to ui_errors.log and ui_freeze.log in data
     if arguments.mode == "watch":
-        with exclusive_operation("watch"):
+        with keeper_watchdog.watch_lock(keeper_watchdog.HANDOVER_WAIT if arguments.handover else 0,
+                                        lock=exclusive_operation):
+            keeper_watchdog.start(root, DATA)
+            keeper_heartbeat.start(DATA)
             # DANGER ZONE HIGH: Only opted-in previous-boot recovery may show on login.
             # Same-boot restarts and normal tab closures never reopen old work.
-            if auto_restore_enabled():
-                recovery = startup_recovery(read_boot_id())
-                if recovery:
-                    root.deiconify()
-                    RecoveryWindow(root, *recovery, watch_mode=True).read_desktop_look()
+            # A failure here is logged and the window hidden; it must never stop the recorder for the boot.
+            try:
+                if not arguments.no_login_window and auto_restore_enabled():
+                    recovery = startup_recovery(read_boot_id())
+                    if recovery:
+                        root.deiconify()
+                        RecoveryWindow(root, *recovery, watch_mode=True).read_desktop_look()
+            except Exception as error:
+                keeper_heartbeat.log_line(DATA, f"login recovery screen failed, recording anyway: {error!r}")
+                root.withdraw()
             root.after(1000, lambda: watch(root))
-            root.mainloop()
+            try:
+                root.mainloop()
+            finally:
+                keeper_heartbeat.stop()
         return
     # Show the loading window first; read snapshots and live sessions off the Tk thread.
     loading = LoadingWindow(root)
@@ -538,11 +591,16 @@ def main():
 
 # WHAT IT DOES: Opens the recovery screen from the loaded history, or says nothing is saved yet.
 # DEPENDS ON: Tk main thread; the loading window is closed by the caller after this returns.
-# AFFECTS: Shows RecoveryWindow and records its window for a second launch to raise; no history exits.
-def open_recovery(root, history, live=None):
+# AFFECTS: Shows RecoveryWindow and records its window for a second launch to raise (which also reloads
+# it, keeper_reload); warns when the recorder is off or stuck and starts it if off; no history exits.
+def open_recovery(root, history, live=None, extras=None):
     if history:
         root.deiconify()
-        RecoveryWindow(root, *history[0], history=history, live=live).read_desktop_look()
+        view = RecoveryWindow(root, *history[start_index(history, extras)], history=history, live=live, extras=extras)
+        view.read_desktop_look()
+        health = lambda screen: show_recorder_health(screen, DATA)   # red line; starts a stopped recorder
+        health(view)
+        ReloadWatch(view, reload_path(), load_recovery_start, after_reload=health).start()
         publish_window(root)
     else:
         print("No Session Keeper snapshot exists yet.")

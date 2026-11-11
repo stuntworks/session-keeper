@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Fix-it restore test takes a throwaway lock | Full history: git log
+# Last modified: 2026-11-10 | Change: Monitor-change test: the one-group check now re-reads monitors before skipping | Full history: git log
 """Owner rule 2026-10-22: no bare "paused" or "skipped". Each stop names the tab (and monitor where a
 window is involved) and says what to do, plus the go-ahead button where one exists."""
 
@@ -69,8 +69,8 @@ class RestoreMessageTests(unittest.TestCase):
         self.assertIn("type a message", line)
 
     def test_monitor_change_says_how_to_fix(self):
-        reads = iter([MONITORS, MONITORS[:1]])
-        with patch("keeper_restore.read_monitors", side_effect=lambda: next(reads)), \
+        reads = iter([MONITORS])      # the start sees both monitors; every later read (and retry) only one
+        with patch("keeper_restore.read_monitors", side_effect=lambda: next(reads, MONITORS[:1])),              patch("keeper_restore.time.sleep"), \
              patch("keeper_restore.live_session_ids", return_value=set()), \
              patch("keeper_restore.read_windows", return_value=[]), \
              patch("keeper_restore.load_created_windows", return_value=[]), \

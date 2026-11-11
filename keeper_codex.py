@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Read command line and folder only for codex.exe, never start times of every process | Full history: git log
+# Last modified: 2026-11-10 | Change: One unreadable Codex process no longer ends the whole capture (noted in skipped) | Full history: git log
 """Read-only Codex CLI inventory for Session Keeper."""
 
 import json
@@ -56,8 +56,12 @@ def verified_rollout_id(path, expected_id):
 
 # WHAT IT DOES: Reads active Codex CLI processes and the IDs that can be proved.
 # DEPENDS ON: psutil, process command lines, console titles, and rollout files.
+# skipped: optional list that receives one line per process that could not be fully read.
 # AFFECTS: Recovery snapshots and duplicate detection use these IDs.
-def active_codex_sessions(read_titles=True):
+# DANGER ZONE HIGH: One process must never end the whole scan / breaks: the recorder / depends on: an
+# unreadable Codex staying UNIDENTIFIED (sessionId None) when titles are not read, so a restore still stops.
+def active_codex_sessions(read_titles=True, skipped=None):
+    from keeper_inventory import guarded, note_skip
     sessions = []
     # Only the name is read for every process. The old list also read every process's start time,
     # which nothing used and which took ~8 s on protected system processes.
@@ -76,10 +80,12 @@ def active_codex_sessions(read_titles=True):
                                  "sessionId": None, "cwd": process.info.get("cwd"),
                                  "method": "headless-command", "role": role})
                 continue
-            title = console_title(process.pid) if read_titles else None
+            title = guarded(lambda: console_title(process.pid), None, skipped, "Codex", process.pid,
+                            "could not read its tab title") if read_titles else None
             # DANGER ZONE HIGH: A CLI can switch chats / breaks: correct resume ID / depends on: currently open main rollout.
             verified = set()
-            for opened in process.open_files():
+            for opened in guarded(process.open_files, [], skipped, "Codex", process.pid,
+                                  "could not read its open files"):
                 path = Path(opened.path)
                 match = ROLLOUT_NAME.fullmatch(path.name)
                 if match:
@@ -95,6 +101,9 @@ def active_codex_sessions(read_titles=True):
                              "method": method, "role": "interactive"})
         except psutil.NoSuchProcess:
             continue
-        except (psutil.AccessDenied, OSError, ValueError) as error:
-            raise RuntimeError(f"Cannot inspect Codex process {process.pid}") from error
+        except Exception as error:
+            note_skip(skipped, "Codex", process.pid, "could not be inspected", error)
+            if not read_titles:              # restore checks: an unreadable Codex still blocks a restore
+                sessions.append({"pid": process.pid, "title": None, "sessionId": None,
+                                 "cwd": (process.info or {}).get("cwd"), "method": "unreadable", "role": "unknown"})
     return sessions

@@ -1,10 +1,11 @@
-# Last modified: 2026-10-22 | Change: Monitors drawn as real monitors: bezel, recessed desktop, chin, stand | Full history: git log
+# Last modified: 2026-10-26 | Change: Monitor body, chin name and stand-in wallpaper shade come from the palette (light mode) | Full history: git log
 """Canvas drawing for the recovery map: monitor bezels with tinted screens and taskbars, Windows Terminal
 windows and their tabs. Display only: the map (keeper_picker) owns state and clicks; this module only paints."""
 
 from keeper_theme import (AMBER, BEZEL, BEZEL_LIT, BLACK, CHIN, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO, IC_ADD,
                           IC_CHECK, IC_CLOSE, IC_DOWN, IC_MAX, IC_MIN, IC_TERMINAL, INK, MONITOR_EDGE, OPEN_FILL, OUTLINE, POWER,
-                          RECESS, SHADOW, STEEL, STRIP, TASKBAR, TERM, WALL_CEIL, mix, rounded)
+                          RECESS, SHADOW, STEEL, STRIP, TASKBAR, TERM, WALL_CEIL, CHIN_INK, GO_TEXT, MONITOR_BODY,
+                          WALL_SHADE, mix, rounded)
 
 STRIP_H, TAB_H, TAB_GAP = 50, 38, 6         # design pixels, as in the mockup
 MIN_NAME_CHARS = 6                            # a squeezed tab still shows 6 letters of its name
@@ -68,7 +69,7 @@ class Painter:
             return []
         parts = [(f"+{len(hidden)}", INK)]
         selected = sum(1 for info in hidden if info["state"] == "selected")
-        return parts + ([(f" · {selected} selected", GO)] if selected else [])
+        return parts + ([(f" · {selected} selected", GO_TEXT)] if selected else [])
 
     def more_width(self, hidden):
         return sum(self.fonts()[0].measure(text) for text, _ in self.more_parts(hidden)) + self.px(24)
@@ -186,7 +187,7 @@ class Painter:
         canvas.create_polygon(rounded(x1 + px(4), y1 + px(10), x2 + px(4), y2 + px(10), radius), smooth=True,
                               fill=SHADOW, outline="")
         bottom = self.draw_stand(place.get("stand") or {"x": x1, "y": y2, "w": bezel["w"], "h": px(40)})
-        canvas.create_polygon(rounded(x1, y1, x2, y2, radius), smooth=True, fill=BEZEL, outline=MONITOR_EDGE,
+        canvas.create_polygon(rounded(x1, y1, x2, y2, radius), smooth=True, fill=MONITOR_BODY, outline=MONITOR_EDGE,
                               width=px(3), tags=("bezel",))
         chin_top = bar["y"] + bar["h"] + px(6)
         canvas.create_polygon(rounded(x1 + px(2), chin_top, x2 - px(2), y2 - px(2), radius - px(2)), smooth=True,
@@ -202,7 +203,7 @@ class Painter:
         canvas.create_line(sx1 - edge / 2, sy2 + edge, sx2 + edge / 2, sy2 + edge, fill=EDGE, width=max(px(1), 1))
         middle, chin = (x1 + x2) / 2, (chin_top + y2) / 2
         font = self.theme.font("display", 21)
-        canvas.create_text(middle, chin, text=fit_text(font, name, bezel["w"] - px(90)), font=font, fill=INK)
+        canvas.create_text(middle, chin, text=fit_text(font, name, bezel["w"] - px(90)), font=font, fill=CHIN_INK)
         dot = px(4)
         canvas.create_oval(x2 - px(30) - dot, chin - dot, x2 - px(30) + dot, chin + dot, fill=POWER, width=0)
         return bottom
@@ -220,7 +221,7 @@ class Painter:
             canvas.create_image(x, y, image=desktop, anchor="nw")
             return
         bands = 28
-        top, low = mix(tint, WALL_CEIL, 0.30), mix(tint, BLACK, 0.30)
+        top, low = mix(tint, WALL_CEIL, 0.30), mix(tint, WALL_SHADE, 0.30)
         for step in range(bands):
             canvas.create_rectangle(x, y + h * step / bands, x + w, y + h * (step + 1) / bands + 1,
                                     fill=mix(top, low, step / (bands - 1)), width=0)
@@ -241,7 +242,7 @@ class Painter:
                               foot_top + px(4), middle - neck_low, foot_top + px(4), fill=CHIN, outline=MONITOR_EDGE,
                               width=px(2))
         canvas.create_polygon(rounded(middle - foot, foot_top, middle + foot, bottom, px(8)), smooth=True,
-                              fill=BEZEL, outline=MONITOR_EDGE, width=px(2), tags=("stand",))
+                              fill=MONITOR_BODY, outline=MONITOR_EDGE, width=px(2), tags=("stand",))
         canvas.create_line(middle - foot + px(10), foot_top + px(2), middle + foot - px(10), foot_top + px(2),
                            fill=BEZEL_LIT, width=max(px(1), 1))
         return bottom + px(8)

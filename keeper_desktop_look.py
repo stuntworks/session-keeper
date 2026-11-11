@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Monitor names and wallpapers for the map, read locally, never saved | Full history: git log
+# Last modified: 2026-10-26 | Change: Stand-in wallpaper's darker end follows the palette (light mode) | Full history: git log
 """What this PC's monitors look like, so the map can draw them: each monitor's model name (from its EDID) and
 its desktop wallpaper (or solid colour), dimmed so windows and text on top stay readable.
 Read only, local only, never saved into snapshots. Any failure gives an empty answer: the map then draws its
@@ -8,7 +8,7 @@ import ctypes
 import winreg
 from ctypes import wintypes
 
-from keeper_theme import WALL_CEIL, WALL_FLOOR
+from keeper_theme import WALL_CEIL, WALL_FLOOR, WALL_SHADE
 
 MAX_WIDTH = 1600              # wallpapers are kept at most this wide; the map is never bigger per monitor
 GREY_SHARE = 0.45             # how much colour is taken out before dimming
@@ -87,7 +87,7 @@ def dim_image(image):
 def tinted_desktop(tint, size):
     from PIL import Image
     width, height = size
-    top, low = blend(tint, WALL_CEIL, 0.30), blend(tint, "#000000", 0.30)
+    top, low = blend(tint, WALL_CEIL, 0.30), blend(tint, WALL_SHADE, 0.30)
     shade = Image.linear_gradient("L").resize(size, Image.BILINEAR)
     picture = Image.composite(Image.new("RGB", size, low), Image.new("RGB", size, top), shade)
     glow_w, glow_h = max(1, round(width * 0.75)), max(1, round(height * 0.85))

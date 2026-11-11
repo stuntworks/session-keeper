@@ -1,10 +1,11 @@
-# Last modified: 2026-11-03 | Change: Hover popup moved to keeper_hovertip (fixes the hover freeze) | Full history: git log
+# Last modified: 2026-11-10 | Change: Plain notes for a drive not connected and a chat that may not be a terminal chat; the no-saved-place chip uses its window's own title | Full history: git log
 """The monitor map IS the menu. Display only: it never launches, moves or closes anything."""
 
 import tkinter as tk
 from tkinter import ttk
 
 from keeper_chooser import captured, clock
+from keeper_coords import map_snapshot
 from keeper_desktop_look import match, tinted_desktop
 from keeper_drawer import Drawer
 from keeper_hovertip import HoverTip
@@ -12,7 +13,7 @@ from keeper_map_layout import exact_layout, split_windows
 from keeper_tabdetails import tab_details
 from keeper_tabmenu import draw_menu
 from keeper_terminal_view import Painter
-from keeper_theme import AMBER, BEZEL, DIM, EDGE, GO, INK, ROOM, TINTS, Theme
+from keeper_theme import AMBER, BEZEL, DIM, EDGE, GO_TEXT, INK, ROOM, TINTS, Theme
 from keeper_zorder import hidden_windows, stack_order, taskbar_buttons
 
 HINT = "Click a tab to see\nhow to bring it back"
@@ -51,11 +52,12 @@ class SnapshotMap(tk.Frame):
         self.canvas.bind("<Configure>", self.on_resize)
         self.canvas.bind("<MouseWheel>", self.on_wheel)
 
-    # WHAT IT DOES: Shows a (new) saved layout.
+    # WHAT IT DOES: Shows a (new) saved layout. An older snapshot's window spots are drawn converted to
+    # physical pixels (keeper_coords.map_snapshot), the same spots a restore would use.
     # DEPENDS ON: Data owned by the recovery window.
     # AFFECTS: Redraws the map.
     def show(self, snapshot, rows, live, options):
-        self.snapshot, self.rows, self.live, self.options = snapshot, rows, live, options
+        self.snapshot, self.rows, self.live, self.options = map_snapshot(snapshot), rows, live, options
         self.detail_key = None
         self.fill_detail(None)
         self.draw()
@@ -176,6 +178,12 @@ class SnapshotMap(tk.Frame):
         label = ("? " if state == "unknown" else "") + full   # the tab itself shortens it to fit
         if state == "unknown" and tab.get("outcome") == "MATCHED" and not (tab.get("cwd") or "").strip():
             unknown_note = "project folder not recorded, cannot be restored"
+        elif state == "unknown" and tab.get("drive_offline"):
+            unknown_note = "drive not connected, cannot be restored"
+        elif state == "unknown" and tab.get("folder_missing"):
+            unknown_note = "project folder is gone from this PC, cannot be restored"
+        elif state == "unknown" and tab.get("origin_unknown"):
+            unknown_note = "may not be a terminal chat, cannot be restored"
         else:
             unknown_note = "not identified, cannot be restored"
         note = {"live": "already open", "unknown": unknown_note,
@@ -199,8 +207,16 @@ class SnapshotMap(tk.Frame):
         selected, unknown = states.count("selected"), states.count("unknown")
         parts = [(f"{live} open", DIM)] if live else []
         parts += [(f"{missing} missing", AMBER)] if missing else []
-        parts += [(f"{selected} selected", GO)] if selected else []
-        parts += [(f"{unknown} not identified", DIM)] if unknown else []
+        parts += [(f"{selected} selected", GO_TEXT)] if selected else []
+        tabs = self.snapshot["windows"][window_index].get("tabs", [])
+        gone = sum(1 for tab in tabs if tab.get("folder_missing"))     # keeper_crash.mark_gone; these are "unknown"
+        offline = sum(1 for tab in tabs if tab.get("drive_offline"))   # a subset of gone
+        parts += [(f"{unknown - gone} not identified", DIM)] if unknown - gone > 0 else []
+        parts += [(f"{gone - offline} folder gone", DIM)] if gone - offline else []
+        parts += [(f"{offline} drive not connected", DIM)] if offline else []
+        window = self.snapshot["windows"][window_index]
+        if window.get("crash_group"):    # keeper_crash: died in the crash (or when many tabs closed)
+            parts.insert(0, ((window.get("windowTitle") or "No saved place").replace(", ", " · "), AMBER))
         return parts
 
     # WHAT IT DOES: The last prompt line for a window: "PS <folder>> claude", from its first identified tab.

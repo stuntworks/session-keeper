@@ -1,4 +1,4 @@
-# Last modified: 2026-10-19 | Change: Plan adding missing tabs to their open window and asked-for occupied spots | Full history: git log
+# Last modified: 2026-11-10 | Change: Snapshots written to a temp name then renamed; maximised and missing-monitor spots; origin_unknown tabs not restorable | Full history: git log
 """Session Keeper's read-only inventory and cautious restore decisions."""
 
 from __future__ import annotations
@@ -51,25 +51,43 @@ SESSION_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA
 # DEPENDS ON: Windows PowerShell and the supplied script arguments.
 # AFFECTS: Window inventory and session inventory fail if the command fails.
 def run_powershell(arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", *arguments],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    return run_hidden(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", *arguments], timeout=45)
 
 
-# WHAT IT DOES: Reads terminal window positions and tab titles into a temporary file.
-# DEPENDS ON: The existing read-only UI Automation probe.
+# WHAT IT DOES: Runs a hidden command and returns its text output, like subprocess.run(capture_output=True, text=True).
+# DEPENDS ON: Temporary files for stdout/stderr instead of pipes.
+# AFFECTS: On timeout the command is killed and subprocess.TimeoutExpired is raised, as before.
+# DANGER ZONE HIGH: No pipes here / breaks: the background recorder (stopped 12 days, 2026-10-29) / depends on:
+# with pipes, Python on Windows waits after a timeout until EVERY process holding the pipe exits, so a
+# grandchild the command left behind blocked the capture forever. A file has no reader to wait for.
+def run_hidden(command: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        result = subprocess.run(command, stdout=out, stderr=err, timeout=timeout,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+
+        # WHAT IT DOES: Reads one captured stream back as text with universal newlines, as text=True gave.
+        def text(handle):
+            handle.seek(0)
+            return handle.read().decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+
+        return subprocess.CompletedProcess(result.args, result.returncode, text(out), text(err))
+
+
+# WHAT IT DOES: Reads terminal window positions (physical pixels) and tab titles into a temporary file.
+# DEPENDS ON: The read-only UI Automation probe run with -Physical, which marks its output "coords": "physical".
 # AFFECTS: Snapshots omit geometry if the probe cannot read it.
+# DANGER ZONE HIGH: Physical-only / breaks: restore spots on scaled monitors / depends on: the probe's coords marker.
 def read_windows() -> list[dict]:
     with tempfile.TemporaryDirectory(prefix="session_keeper_") as folder:
         output = Path(folder) / "windows.json"
-        result = run_powershell(["-File", str(UIA_SCRIPT), "-OutFile", str(output)])
+        result = run_powershell(["-File", str(UIA_SCRIPT), "-OutFile", str(output), "-Physical"])
         if result.returncode or not output.exists():
             raise RuntimeError(f"Terminal probe failed: {result.stderr.strip()}")
         result_data = json.loads(output.read_text(encoding="utf-8"))
         if result_data.get("errors"):
             raise RuntimeError("A terminal window could not be inspected. Retry after it settles.")
+        if result_data.get("coords") != "physical":
+            raise RuntimeError("The terminal probe did not report physical pixels. Restart Session Keeper.")
         return result_data.get("windows", [])
 
 
@@ -85,11 +103,12 @@ def read_boot_id() -> str:
 
 # WHAT IT DOES: Captures live Claude and Codex CLI sessions with their observed terminal groups.
 # DEPENDS ON: Verified process records, console titles, and current Windows Terminal UI.
+# skipped: optional list; one line per process that could not be read (that process alone is left out).
 # AFFECTS: Restore eligibility and layout depend on this mapping.
-def capture_snapshot() -> dict:
+def capture_snapshot(skipped=None) -> dict:
     windows = read_windows()
     from keeper_inventory import live_inventory, match_inventory
-    sessions = live_inventory()
+    sessions = live_inventory(skipped=skipped)
     report_windows, unmatched, counts = match_inventory(windows, sessions)
     import keeper_zorder
     try:   # "z" = front-to-back rank (0 = front); the list order alone is not a documented z-order
@@ -98,6 +117,7 @@ def capture_snapshot() -> dict:
         pass   # no z: the map and restore fall back to list order
     snapshot = {
         "version": 1,
+        "coords": "physical",   # window rects share the monitors' pixels; keeper_coords converts older ones
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "boot_id": read_boot_id(),
         "windows": report_windows,
@@ -109,16 +129,33 @@ def capture_snapshot() -> dict:
     return snapshot
 
 
-# WHAT IT DOES: Saves a new immutable snapshot without replacing an earlier one.
+# WHAT IT DOES: Saves a new immutable snapshot without replacing an earlier one. It is written in full to a
+# temp name in the same folder (partial_*.tmp, never matching snapshot_*.json), flushed to disk, then renamed,
+# so a kill mid-write can never leave a truncated file under a snapshot name.
 # DEPENDS ON: Writable data directory and a JSON-serializable snapshot.
-# AFFECTS: Recovery history is missing if this fails.
+# AFFECTS: Recovery history is missing if this fails. A killed write leaves only a partial_*.tmp file.
+# DANGER ZONE FRAGILE: Never replaces an existing snapshot / breaks: history preservation / depends on: unique
+# names, the exists() check and os.rename, which on Windows refuses (FileExistsError) when the name exists.
 def save_snapshot(snapshot: dict, data_dir: Path = DATA) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    path = data_dir / f"snapshot_{stamp}_{uuid.uuid4().hex[:8]}.json"
-    # DANGER ZONE FRAGILE: Exclusive create prevents replacement / breaks: history preservation / depends on: unique names.
-    with path.open("x", encoding="utf-8") as file:
-        json.dump(snapshot, file, ensure_ascii=False, indent=2)
+    name = f"snapshot_{stamp}_{uuid.uuid4().hex[:8]}.json"
+    path = data_dir / name
+    if path.exists():
+        raise FileExistsError(f"snapshot already exists: {path}")
+    temp = data_dir / f"partial_{name[:-5]}.tmp"
+    try:
+        with temp.open("x", encoding="utf-8") as file:
+            json.dump(snapshot, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.rename(temp, path)
+    except BaseException:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -135,6 +172,10 @@ def recovery_rows(snapshot: dict) -> list[dict]:
                 continue
             # Never guess the folder: a tab with no saved folder stays shown but is not restorable.
             if not isinstance(tab.get("cwd"), str) or not tab["cwd"].strip():
+                continue
+            # Same rule for a folder that no longer exists or is on a drive not connected (keeper_crash.mark_gone),
+            # and for a died-in-crash chat not known to be a terminal chat (origin_unknown): shown, not restorable.
+            if tab.get("folder_missing") or tab.get("origin_unknown"):
                 continue
             rows.append({"key": f"{window_index}:{tab_index}", "window_index": window_index,
                          "tab_index": tab_index, "session_id": tab["sessionId"],
@@ -172,7 +213,7 @@ def plan_restore(snapshot: dict, selected_keys: set[str], live_ids: set[str],
     plans = []
     reader = LazyGroups(live_groups)
     for window_index, rows in by_window.items():
-        rect = saved_rect(rows, monitors, warnings)
+        rect = saved_rect(rows, monitors, warnings, fallback_slot(snapshot, window_index, monitors))
         if rect is None:
             continue
         occupying = [window for window in current_windows if rectangles_overlap(rect, window)]
@@ -183,7 +224,8 @@ def plan_restore(snapshot: dict, selected_keys: set[str], live_ids: set[str],
                 plans.append({"rect": rect, "tabs": rows, "window_name": owned_target["window_name"]})
                 continue
         saved_ids = [row["session_id"] for row in all_rows if row["window_index"] == window_index]
-        if live_groups is not None and set(saved_ids) & set(live_ids):
+        # Never for the died-in-crash group: it was never one window, so a live chat from it is no "home".
+        if live_groups is not None and set(saved_ids) & set(live_ids) and not rows[0]["window"].get("crash_group"):
             from keeper_home import SPLIT, home_window
             home = home_window(saved_ids, live_ids, reader.get())
             if home == SPLIT:
@@ -222,14 +264,17 @@ def missing_position(title):
 
 
 # WHAT IT DOES: Returns the saved rectangle to restore, moving minimised or off-screen windows onto a monitor.
+# slot (fallback_slot) steps each moved window in a little, so several never land on one spot.
+# A window saved maximised gets its monitor's work area (it is maximised there after placing); a window
+# saved without the "maximized" field is handled exactly as before.
 # DEPENDS ON: The saved window position and current monitors.
 # AFFECTS: Warnings explain every position change; None means the group is skipped.
-def saved_rect(rows, monitors, warnings):
+def saved_rect(rows, monitors, warnings, slot=0):
     from keeper_home import is_minimised, minimised_rect
     original = rows[0]["window"]
     rect = {key: original.get(key) for key in ("x", "y", "w", "h")}
     if all(type(value) is int for value in rect.values()) and is_minimised(rect):
-        fallback = minimised_rect(monitors)
+        fallback = minimised_rect(monitors, slot)
         if fallback is None:
             warnings.append(missing_position(rows[0]["title"]))
             return None
@@ -240,12 +285,31 @@ def saved_rect(rows, monitors, warnings):
         warnings.append(missing_position(rows[0]["title"]))
         return None
     if monitors is not None:
-        from keeper_display import keep_visible
-        visible = keep_visible(rect, monitors)
+        from keeper_display import keep_visible, monitor_area
+        visible = keep_visible(rect, monitors, slot)
         if visible != rect:
             warnings.append(f"Saved monitor is unavailable; using the primary monitor: {rows[0]['title']}")
             rect = visible
+        elif original.get("maximized") is True:
+            rect = monitor_area(rect, monitors) or rect
     return rect
+
+
+# WHAT IT DOES: This window's place among the saved windows that will need a fallback spot (minimised, or on
+# no current monitor), counted in saved order, so it is the same in every plan of the same restore.
+# DEPENDS ON: The snapshot's window rectangles and current monitors.
+# AFFECTS: Pure. 0 for the first such window, which keeps exactly the old fallback spot.
+def fallback_slot(snapshot, window_index, monitors):
+    from keeper_display import on_some_monitor
+    from keeper_home import is_minimised
+    slot = 0
+    for window in (snapshot.get("windows") or [])[:window_index]:
+        rect = {key: window.get(key) for key in ("x", "y", "w", "h")}
+        if not all(type(value) is int for value in rect.values()):
+            continue
+        if is_minimised(rect) or (monitors and not on_some_monitor(rect, monitors)):
+            slot += 1
+    return slot
 
 
 # WHAT IT DOES: Decides whether every window on a saved spot is a verified window from this same layout.

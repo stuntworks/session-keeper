@@ -1,11 +1,11 @@
-# Last modified: 2026-10-22 | Change: Open it for me / Open a second copy; stop reports show each tab's command with Copy and Open | Full history: git log
+# Last modified: 2026-10-26 | Change: Selected pill lettering uses the palette's BLACK | Full history: git log
 """The details drawer: a hint, one tab's details and exact resume command, or a preview/restart report.
 Display only. Restart this tab calls back into the recovery window, which runs the normal guarded restore."""
 
 import tkinter as tk
 
 from keeper_background import run_background
-from keeper_theme import (AMBER, BEZEL, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO, IC_CHECK, IC_CLOSE, IC_COPY, IC_RESTART,
+from keeper_theme import (AMBER, BEZEL, BLACK, CLAUDE, CLAUDE_MARK, DIM, EDGE, GO, IC_CHECK, IC_CLOSE, IC_COPY, IC_RESTART,
                           INK, OPEN_FILL, STEEL, TERM, FlatButton, label, reduced_motion, rounded)
 
 try:  # built separately; the drawer works without it
@@ -15,7 +15,7 @@ except ImportError:
 
 READING = "Reading…"
 HOW_TO_PASTE = "Copy it, paste into a new PowerShell tab, press Enter. Or press Open it for me."
-PILLS = {"missing": ("Missing", None, AMBER, AMBER, (5, 3)), "selected": ("Missing · selected", GO, "#000000", GO, None),
+PILLS = {"missing": ("Missing", None, AMBER, AMBER, (5, 3)), "selected": ("Missing · selected", GO, BLACK, GO, None),
          "live": ("Open", OPEN_FILL, INK, STEEL, None), "unknown": ("Can't be identified", None, INK, STEEL, (2, 3))}
 
 

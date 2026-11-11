@@ -1,24 +1,26 @@
-# Last modified: 2026-10-21 | Change: Header (title, view switch, legend) and bottom action bar of the recovery screen | Full history: git log
+# Last modified: 2026-11-10 | Change: Red recorder-warning line in the header (set_warning) | Full history: git log
 """Widgets around the map: the header and the bottom bar. Display only; every button calls back into
 keeper_app.RecoveryWindow, which owns the behaviour and the safety checks."""
 
 import tkinter as tk
 
-from keeper_theme import (AMBER, BEZEL, DIM, EDGE, GO, IC_COPY, IC_PREVIEW, IC_RESTART, INK, OPEN_FILL, ROOM,
-                          STEEL, FlatButton, checkbox, label, rounded)
+from keeper_theme import (AMBER, BEZEL, DIM, EDGE, GO, GO_TEXT, GUIDE_EDGE, GUIDE_FILL, GUIDE_INK, GUIDE_MARK,
+                          GUIDE_TAG, IC_COPY, IC_PREVIEW, IC_RESTART, INK, MODE, OPEN_FILL, ROOM, STEEL, STOP, FlatButton,
+                          checkbox, label, rounded)
 
-SAVED, NOW = "saved", "now"
+SAVED, NOW, ALL = "saved", "now", "all"
 GUIDE_STEPS = ("Crashed? Press Restore all (bottom right) to bring everything back.",
                "Want one chat? Click its tab, then press Open it for me.",
                "Grey = already open.  Red dot = missing.  Green = picked.")
 
 
-# WHAT IT DOES: The header: SESSION KEEPER, the Saved recovery / On screen now switch, the legend,
-# a one-line summary and the auto-restore checkbox.
-# DEPENDS ON: Theme; on_view(name) callback; the auto-restore BooleanVar and its save callback.
+# WHAT IT DOES: The header: SESSION KEEPER, the Saved recovery / On screen now / All sessions switch, the legend,
+# the Dark mode / Light mode switch, a one-line summary and the auto-restore checkbox.
+# DEPENDS ON: Theme; on_view(name) callback; the auto-restore BooleanVar and its save callback; on_theme(mode)
+# callback (no switch is drawn without it).
 # AFFECTS: Widgets only.
 class Header(tk.Frame):
-    def __init__(self, parent, theme, on_view, auto_var, on_auto):
+    def __init__(self, parent, theme, on_view, auto_var, on_auto, on_theme=None):
         super().__init__(parent, background=ROOM)
         t, px = theme, theme.px
         top = tk.Frame(self, background=ROOM)
@@ -31,7 +33,10 @@ class Header(tk.Frame):
         tk.Frame(switch, background=EDGE, width=px(2)).pack(side="left", fill="y")
         self.now_btn = FlatButton(switch, t, "On screen now", lambda: on_view(NOW), kind="seg", height=40)
         self.now_btn.pack(side="left")
-        for button in (self.saved_btn, self.now_btn):
+        tk.Frame(switch, background=EDGE, width=px(2)).pack(side="left", fill="y")
+        self.all_btn = FlatButton(switch, t, "All sessions", lambda: on_view(ALL), kind="seg", height=40)
+        self.all_btn.pack(side="left")
+        for button in (self.saved_btn, self.now_btn, self.all_btn):
             button.configure(highlightthickness=0)
         self.legend = tk.Canvas(top, height=px(30), width=px(470), background=ROOM, highlightthickness=0)
         self.legend.pack(side="right")
@@ -40,25 +45,42 @@ class Header(tk.Frame):
         second.pack(fill="x", pady=(px(14), 0))
         self.sub_label = label(second, t, size=20, colour=DIM, anchor="w")
         self.sub_label.pack(side="left")
+        self.theme_switch = None
+        if on_theme:
+            # On the summary row, far right: the top row is full (title, views, legend) on narrower windows.
+            self.theme_switch = tk.Frame(second, background=EDGE, padx=px(2), pady=px(2))
+            self.theme_switch.pack(side="right", padx=(px(28), 0))
+            self.dark_btn = FlatButton(self.theme_switch, t, "Dark mode", lambda: on_theme("dark"),
+                                       kind="seg_on" if MODE != "light" else "seg", height=40)
+            self.dark_btn.pack(side="left")
+            tk.Frame(self.theme_switch, background=EDGE, width=px(2)).pack(side="left", fill="y")
+            self.light_btn = FlatButton(self.theme_switch, t, "Light mode", lambda: on_theme("light"),
+                                        kind="seg_on" if MODE == "light" else "seg", height=40)
+            self.light_btn.pack(side="left")
+            for button in (self.dark_btn, self.light_btn):
+                button.configure(highlightthickness=0)
         self.auto_box = checkbox(second, t, "Restore saved chats at next Windows login (10-second Stop countdown)",
                                  auto_var, on_auto)
         self.auto_box.pack(side="right")
         # Where to start, for someone who has never seen the screen. Saved recovery only.
-        # Green frame and green step numbers so the eye lands here first.
-        self.guide = tk.Frame(self, background=BEZEL, highlightthickness=px(2), highlightbackground=GO,
-                              highlightcolor=GO)
-        label(self.guide, t, "HOW TO USE", kind="display", size=24, colour=GO, anchor="w").grid(
+        # Green so the eye lands here first: a green frame and numbers in dark mode, a solid green band in light.
+        self.guide = tk.Frame(self, background=GUIDE_FILL, highlightthickness=px(2), highlightbackground=GUIDE_EDGE,
+                              highlightcolor=GUIDE_EDGE)
+        label(self.guide, t, " HOW TO USE " if GUIDE_TAG != GUIDE_FILL else "HOW TO USE", kind="display", size=24,
+              colour=GO, background=GUIDE_TAG, anchor="w").grid(
             row=0, column=0, sticky="w", padx=(px(20), px(28)), pady=px(14))
         for number, text in enumerate(GUIDE_STEPS, start=1):
-            step = tk.Frame(self.guide, background=BEZEL)
+            step = tk.Frame(self.guide, background=GUIDE_FILL)
             step.grid(row=0, column=number, sticky="w", padx=(0, px(28)), pady=px(14))
-            label(step, t, str(number), kind="display", size=28, colour=GO).pack(side="left", padx=(0, px(10)))
-            label(step, t, text, size=20, colour=INK, anchor="w", justify="left",
+            label(step, t, str(number), kind="display", size=28, colour=GUIDE_MARK).pack(side="left", padx=(0, px(10)))
+            label(step, t, text, size=20, colour=GUIDE_INK, anchor="w", justify="left",
                   wraplength=px(620)).pack(side="left")
             self.guide.grid_columnconfigure(number, weight=1)
         self.guide_gap = px(14)
         self.guide.pack(fill="x", pady=(self.guide_gap, 0))
         self.notice_label = label(self, t, size=19, colour=AMBER, anchor="w", justify="left")
+        # Recorder off / stuck / not saving (keeper_recorder_health). Above the notice, in the STOP colour.
+        self.warning_label = label(self, t, size=19, colour=STOP, anchor="w", justify="left")
 
     # WHAT IT DOES: Open / Missing / Selected swatches drawn exactly like the tabs they explain.
     def draw_legend(self, t):
@@ -77,11 +99,13 @@ class Header(tk.Frame):
     def set_view(self, name):
         self.saved_btn.configure(kind="seg_on" if name == SAVED else "seg")
         self.now_btn.configure(kind="seg_on" if name == NOW else "seg")
+        self.all_btn.configure(kind="seg_on" if name == ALL else "seg")
         # The legend explains the map's tabs, so it only shows where the map is.
         if name == SAVED:
             self.legend.pack(side="right")
             # Above the notice line when one is showing, so the order never changes.
-            place = {"before": self.notice_label} if self.notice_label.winfo_manager() else {}
+            shown = [line for line in (self.warning_label, self.notice_label) if line.winfo_manager()]
+            place = {"before": shown[0]} if shown else {}
             self.guide.pack(fill="x", pady=(self.guide_gap, 0), **place)
         else:
             self.legend.pack_forget()
@@ -94,6 +118,15 @@ class Header(tk.Frame):
             self.notice_label.pack(fill="x", pady=(self.notice_label.winfo_reqheight() // 4, 0))
         else:
             self.notice_label.pack_forget()
+
+    # WHAT IT DOES: Shows the red recorder warning line above the notice, or hides it when empty.
+    def set_warning(self, text):
+        self.warning_label.configure(text=text)
+        if text:
+            place = {"before": self.notice_label} if self.notice_label.winfo_manager() else {}
+            self.warning_label.pack(fill="x", pady=(self.warning_label.winfo_reqheight() // 4, 0), **place)
+        else:
+            self.warning_label.pack_forget()
 
 
 # WHAT IT DOES: The bottom bar: Select all, the count, Copy command, Preview, a status line,
@@ -128,5 +161,5 @@ class ActionBar(tk.Frame):
         self.countdown_text = label(status, t, size=20, colour=INK, anchor="w", justify="left",
                                     wraplength=px(560))
         self.countdown_text.pack(fill="x")
-        self.copy_status = label(status, t, size=19, colour=GO, anchor="w")
+        self.copy_status = label(status, t, size=19, colour=GO_TEXT, anchor="w")
         self.copy_status.pack(fill="x")

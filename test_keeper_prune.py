@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Tests for the snapshot keep plan (thinning old recovery snapshots) | Full history: git log
+# Last modified: 2026-11-10 | Change: Recorder test patches after_capture (it runs the hourly prune) | Full history: git log
 """Fake snapshots in temporary folders only. Never touches the real data folder."""
 
 import json
@@ -240,11 +240,11 @@ class RecorderTests(unittest.TestCase):
 
     def test_recorder_prunes_only_after_successful_snapshot(self):
         with patch.object(keeper_app, "snapshot_once", return_value=None), \
-                patch.object(keeper_app, "prune_if_due") as due:
+                patch.object(keeper_app, "after_capture") as due:
             self.assertIsNone(keeper_app.record_once())
             due.assert_not_called()
         with patch.object(keeper_app, "snapshot_once", return_value=Path("x.json")), \
-                patch.object(keeper_app, "prune_if_due") as due:
+                patch.object(keeper_app, "after_capture") as due:
             self.assertEqual(keeper_app.record_once(), Path("x.json"))
             due.assert_called_once()
 

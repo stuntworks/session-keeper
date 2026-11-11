@@ -1,4 +1,4 @@
-# Last modified: 2026-10-19 | Change: Find a saved group's still-open window by exact session IDs | Full history: git log
+# Last modified: 2026-11-10 | Change: Minimised windows cascade instead of all reopening on one spot | Full history: git log
 """Pure decisions about where a missing tab belongs. No window is read, focused or moved here."""
 
 SPLIT = "split"
@@ -35,11 +35,16 @@ def is_minimised(rect):
 
 
 # WHAT IT DOES: Picks a visible, ordinary-size spot on the primary monitor for a minimised window.
+# slot: this window's place among the fallback windows (keeper_core.fallback_slot); slot 0 = the old spot exactly,
+# later ones step in diagonally (keeper_display.cascade_offset) so they do not hide each other.
 # DEPENDS ON: Current monitor work areas.
 # AFFECTS: A minimised window is reopened where the user can see it.
-def minimised_rect(monitors):
+def minimised_rect(monitors, slot=0):
     if not monitors:
         return None
+    from keeper_display import cascade_offset
     monitor = next((item for item in monitors if item.get("primary")), monitors[0])
-    return {"x": monitor["x"] + 60, "y": monitor["y"] + 60,
-            "w": max(200, min(1600, monitor["w"] - 120)), "h": max(150, min(900, monitor["h"] - 120))}
+    offset = cascade_offset(slot, monitor["w"] - 120, monitor["h"] - 120)
+    return {"x": monitor["x"] + 60 + offset, "y": monitor["y"] + 60 + offset,
+            "w": max(200, min(1600, monitor["w"] - 120 - offset)),
+            "h": max(150, min(900, monitor["h"] - 120 - offset))}

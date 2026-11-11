@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Monitor hardware tones and the wallpaper brightness ceiling | Full history: git log
+# Last modified: 2026-10-26 | Change: Dark or light palette picked from the saved setting at import | Full history: git log
 """Colour, type and button styling shared by every Session Keeper window. Display only."""
 
 import ctypes
@@ -6,25 +6,25 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
-# Colour tokens (from WORK/2026-10-21 frontend-design/recovery_screen.html, Dim lightened for 4.5:1).
-ROOM, BEZEL, EDGE = "#0E1217", "#1A1F27", "#2A313C"
-# Monitor frame outline: light enough to read as hardware against the dark room.
-MONITOR_EDGE = "#8C96A8"
-TERM, STRIP = "#0C0C0C", "#1F1F1F"
-INK, DIM = "#E6E9EF", "#C2C9D5"   # Dim brightened again (owner: brighter lettering), 7:1+ on every surface
-AMBER, GO, STEEL, STOP = "#F5A524", "#3DDC84", "#5B6575", "#F36D6A"  # Stop lightened from #F0524F for 7:1
-CLAUDE = "#D97757"
-OPEN_FILL = "#2B323D"          # open tabs keep a steel-dark fill; their text stays bright
-HOVER_LINE, HOVER_GO, HOVER_STOP = "#232933", "#5BE69A", "#F78784"
-BLACK = "#000000"
-TINTS = ("#152029", "#1D1B2E")     # monitor screens: 1 a cool teal slate, 2 an indigo slate, so they tell apart
-TASKBAR = "#0F1319"                # each monitor's taskbar strip
-OUTLINE = "#C85A74"                # burgundy edge round every saved terminal window
-# Monitor hardware on the map: a lit top edge, a darker chin, a recessed screen edge, a shadow on the desk.
-BEZEL_LIT, CHIN, RECESS, SHADOW = "#3A4351", "#141920", "#05070A", "#07090C"
-POWER = "#2F9E63"                  # the tiny power light in each chin
-# Desktop wallpaper is dimmed into this range: its brightest pixel keeps every text and outline readable.
-WALL_FLOOR, WALL_CEIL = "#07090C", "#2A3340"
+import keeper_settings
+from keeper_palette import PALETTES, outline_pairs, text_pairs
+
+
+# WHAT IT DOES: The palette for a saved mode: "light" gives the light palette, anything else the dark one.
+# DEPENDS ON: keeper_palette.
+# AFFECTS: Nothing.
+def palette_for(mode):
+    return PALETTES["light"] if mode == "light" else PALETTES["dark"]
+
+
+# Colour tokens, chosen ONCE here from the saved setting (default dark). Every module copies them with
+# `from keeper_theme import X`, so a change of mode takes effect when the app is restarted, not live.
+# Names: ROOM, BEZEL, EDGE, MONITOR_EDGE, TERM, STRIP, INK, DIM, AMBER, GO, GO_TEXT, STEEL, STOP, CLAUDE,
+# OPEN_FILL, HOVER_*, BLACK, ON_STOP, TINTS, TASKBAR, OUTLINE, MONITOR_BODY, BEZEL_LIT, CHIN, RECESS, SHADOW,
+# CHIN_INK, POWER, WALL_FLOOR, WALL_CEIL, WALL_SHADE, WALL_WORST, GUIDE_* (see keeper_palette for each one).
+MODE = keeper_settings.theme_mode()
+PALETTE = palette_for(MODE)
+globals().update(PALETTE)
 
 DISPLAY = "Bahnschrift SemiBold Condensed"
 BODY = "Segoe UI"
@@ -60,25 +60,10 @@ def contrast(first, second):
     return (high + 0.05) / (low + 0.05)
 
 
-# Every text colour drawn on every background it sits on. The theme test checks each pair.
-TEXT_PAIRS = {
-    "ink on room": (INK, ROOM), "ink on bezel": (INK, BEZEL), "ink on terminal": (INK, TERM),
-    "ink on tab strip": (INK, STRIP), "ink on open tab": (INK, OPEN_FILL), "ink on edge": (INK, EDGE),
-    "dim on room": (DIM, ROOM), "dim on bezel": (DIM, BEZEL), "dim on tab strip": (DIM, STRIP),
-    "dim on terminal": (DIM, TERM), "amber on room": (AMBER, ROOM), "amber on bezel": (AMBER, BEZEL),
-    "amber on terminal": (AMBER, TERM), "amber on tab strip": (AMBER, STRIP), "go on bezel": (GO, BEZEL),
-    "black on go": (BLACK, GO), "black on stop": (BLACK, STOP), "room on ink": (ROOM, INK),
-    "black on hover go": (BLACK, HOVER_GO), "black on hover stop": (BLACK, HOVER_STOP),
-    "ink on hover": (INK, HOVER_LINE), "stop on bezel": (STOP, BEZEL), "stop on room": (STOP, ROOM), "claude mark on strip": (CLAUDE, STRIP),
-    "ink on taskbar": (INK, TASKBAR), "dim on taskbar": (DIM, TASKBAR), "amber on taskbar": (AMBER, TASKBAR),
-    **{f"ink on {tint}": (INK, tint) for tint in TINTS}, **{f"dim on {tint}": (DIM, tint) for tint in TINTS},
-    **{f"amber on {tint}": (AMBER, tint) for tint in TINTS},
-    "ink on brightest wallpaper": (INK, WALL_CEIL), "dim on brightest wallpaper": (DIM, WALL_CEIL),
-    "amber on brightest wallpaper": (AMBER, WALL_CEIL), "ink on chin": (INK, CHIN),
-}
-OUTLINE_PAIRS = {"outline on room": (OUTLINE, ROOM), "outline on terminal": (OUTLINE, TERM),
-                 "outline on tab strip": (OUTLINE, STRIP), **{f"outline on {t}": (OUTLINE, t) for t in TINTS},
-                 "outline on brightest wallpaper": (OUTLINE, WALL_CEIL)}
+# Every text colour drawn on every background it sits on, for the active palette. The theme test checks
+# these and the same pairs for both palettes.
+TEXT_PAIRS = text_pairs(PALETTE)
+OUTLINE_PAIRS = outline_pairs(PALETTE)
 MIN_OUTLINE = 3.0                  # WCAG non-text contrast
 MIN_BODY, MIN_SECONDARY = 7.0, 4.5
 
@@ -161,7 +146,7 @@ class Theme:
 
 # Button kinds: (fill, text, border, hover fill).
 KINDS = {"line": (BEZEL, INK, INK, HOVER_LINE), "go": (GO, BLACK, GO, HOVER_GO),
-         "red": (STOP, BLACK, STOP, HOVER_STOP), "ghost": (BEZEL, DIM, BEZEL, EDGE),
+         "red": (STOP, ON_STOP, STOP, HOVER_STOP), "ghost": (BEZEL, DIM, BEZEL, EDGE),
          "seg": (ROOM, DIM, ROOM, BEZEL), "seg_on": (INK, ROOM, INK, INK)}
 DISABLED = (BEZEL, DIM, EDGE)   # readable, but flat and without the bright border
 

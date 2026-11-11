@@ -220,9 +220,9 @@ class PickerWindowTests(unittest.TestCase):
     # A window with many long-named tabs: most do not fit its row on the map.
     def crowded_view(self):
         snapshot = layout()
-        names = ["Website redesign", "Context setup notes", "Davinci Resolve scripting",
-                 "Marketing plan", "Crawl4ai GitHub review", "Docs cleanup",
-                 "Release checklist", "Asset pipeline", "Data scanner", "Call log"]
+        names = ["Vozsay website redesign", "Context setup notes", "Davinci Resolve scripting",
+                 "Storefront launch plan", "Crawl4ai GitHub review", "Filing system cleanup",
+                 "Release checklist", "Font maker pipeline", "Weather bot scanner", "Support call log"]
         snapshot["windows"][1]["tabs"] = [
             {"outcome": "MATCHED", "sessionId": f"{n:08d}-0000-4000-8000-{n:012d}", "strippedTitle": name,
              "cwd": REAL} for n, name in enumerate(names)]

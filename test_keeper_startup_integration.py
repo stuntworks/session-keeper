@@ -1,4 +1,4 @@
-# Last modified: 2026-10-22 | Change: Full restore test takes a throwaway lock, not the live recorder's | Full history: git log
+# Last modified: 2026-11-10 | Change: Fake find_new_window takes the new keyword arguments (baseline, session proof) | Full history: git log
 """Mocks only: no real terminal launches or Windows settings writes."""
 import unittest
 from unittest.mock import patch,MagicMock
@@ -124,7 +124,7 @@ class StartupIntegrationTests(unittest.TestCase):
         def launch(name,row):
             current.append({'hwnd':len(current)+1,'tabs':[row['title']],**{key:row['window'][key] for key in ('x','y','w','h')}})
             live.add(row['session_id'])
-        with patch('keeper_restore.live_session_ids',side_effect=lambda **kw:set(live)), patch('keeper_restore.read_windows',side_effect=lambda:list(current)), patch('keeper_restore.load_created_windows',return_value=[]), patch('keeper_restore.read_boot_id',return_value='boot'), patch('keeper_restore.read_monitors',return_value=[{'x':0,'y':0,'w':4000,'h':2000}]), patch('keeper_restore.launch_tab',side_effect=launch), patch('keeper_restore.find_new_window',side_effect=lambda *args:current[-1]), patch('keeper_restore.record_created_window'), patch('keeper_restore.place_new_window'), patch('keeper_restore.wait_for_session',return_value=True):
+        with patch('keeper_restore.live_session_ids',side_effect=lambda **kw:set(live)), patch('keeper_restore.read_windows',side_effect=lambda:list(current)), patch('keeper_restore.load_created_windows',return_value=[]), patch('keeper_restore.read_boot_id',return_value='boot'), patch('keeper_restore.read_monitors',return_value=[{'x':0,'y':0,'w':4000,'h':2000}]), patch('keeper_restore.launch_tab',side_effect=launch), patch('keeper_restore.find_new_window',side_effect=lambda *args,**kw:current[-1]), patch('keeper_restore.record_created_window'), patch('keeper_restore.place_new_window'), patch('keeper_restore.wait_for_session',return_value=True):
             restored,warnings=restore_selected(layout(),{'0:0','1:0'}, lock_name="unittest-restore")
         # Same two tabs; the order is back window first (keeper_zorder.back_to_front). This snapshot has no
         # "z", so list order counts as front-to-back and the last window ('Second') opens first.

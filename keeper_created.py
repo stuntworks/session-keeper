@@ -1,4 +1,4 @@
-# Last modified: 2026-10-07 | Change: Durable record of windows Session Keeper created | Full history: git log
+# Last modified: 2026-10-27 | Change: Each record also logs the target spot and any converted-from spot | Full history: git log
 """Append-only record of terminal windows Session Keeper itself opened during recovery."""
 
 import json
@@ -17,13 +17,16 @@ def group_key(snapshot: dict, window_index: int) -> str:
 
 
 # WHAT IT DOES: Appends one line recording a window Session Keeper just created.
+# rect is the spot it is placed at (physical pixels); converted_from is the saved spot of an older snapshot.
 # DEPENDS ON: The data folder being writable. Existing lines are never rewritten or deleted.
 # AFFECTS: A later recovery can finish a partly restored window instead of skipping it.
-def record_created_window(window_name, hwnd, group, boot_id, path: Path = None):
+def record_created_window(window_name, hwnd, group, boot_id, path: Path = None, rect=None, converted_from=None):
     entry = {"window_name": window_name, "hwnd": hwnd, "group": group, "boot_id": boot_id}
-    target = path or CREATED_LOG
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with open(target, "a", encoding="utf-8") as handle:
+    if rect is not None:
+        entry["rect"] = rect
+    if converted_from is not None:
+        entry["converted_from"] = converted_from
+    with open(path or CREATED_LOG, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry) + "\n")
 
 

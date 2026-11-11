@@ -1,4 +1,4 @@
-# Last modified: 2026-10-21 | Change: Fast recovery start: parse only the snapshots the screen can show | Full history: git log
+# Last modified: 2026-11-10 | Change: Also keeps the last layout before each Windows Terminal crash (before=) | Full history: git log
 """Find the few saved layouts the recovery screen offers without parsing all ~10,000 files. Read-only.
 
 The chooser (keeper_chooser.chooser_entries) offers: Latest, Before last reboot, 15 min / 1 hour /
@@ -123,7 +123,10 @@ class Probe:
 # WHAT IT DOES: Returns the saved layouts the recovery screen needs, newest first, like read_history.
 # DEPENDS ON: The snapshot folder and the current time (the chooser may run up to LATE afterwards).
 # AFFECTS: Read-only. Choices made in keeper_chooser pick the same snapshot as from the full history.
-def fast_history(data_dir=DATA, now=None):
+# before: crash times (keeper_crash.read_crash_times); the last layout captured strictly before each is kept
+# too, so "Before the crash" is found however many layouts were saved after it. spans: (older, newer) times;
+# every layout captured from older up to (not including) newer is kept (pins down a sharp drop).
+def fast_history(data_dir=DATA, now=None, before=(), spans=()):
     now = (now or datetime.now()).astimezone()
     stamped, others = [], []
     for path in Path(data_dir).glob("snapshot_*.json"):
@@ -147,7 +150,11 @@ def fast_history(data_dir=DATA, now=None):
         for back in range(1, PAST_DAYS + 1):
             ends = datetime.combine(day - timedelta(days=back - 1), time.min).astimezone()
             probe.back_from(ends - timedelta(microseconds=1), ends - timedelta(microseconds=1))
-    history = [item for item in history if name_time(item[0]) is None]
+    for moment in before:
+        probe.back_from(moment - timedelta(microseconds=1), moment - timedelta(microseconds=1))
+    for older, newer in spans:
+        probe.back_from(newer - timedelta(microseconds=1), older)
+    history =[item for item in history if name_time(item[0]) is None]
     history += [(probe.paths[index], probe.load(index)) for index in probe.keep]
     return sorted(history, key=lambda item: item[1]["captured_at"], reverse=True)
 
